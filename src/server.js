@@ -195,7 +195,16 @@ async function route(req, res) {
     body._source = 'POST /v1/chat/completions';
     const result = await handleChatCompletions(body);
     if (result.stream) {
+      // Streaming tuning: keep the socket hot and unblock the first byte.
+      //   setNoDelay — disable Nagle so small SSE deltas aren't coalesced (40ms win)
+      //   setKeepAlive + setTimeout(0) — survive long thinking pauses w/o RST
+      //   flushHeaders — push HTTP response line + headers to the client NOW,
+      //     so SSE clients (esp. CC) exit their "connecting" state immediately
+      req.socket?.setKeepAlive(true);
+      req.setTimeout(0);
+      res.socket?.setNoDelay(true);
       res.writeHead(result.status, { 'Access-Control-Allow-Origin': '*', ...result.headers });
+      res.flushHeaders?.();
       await result.handler(res);
     } else {
       json(res, result.status, result.body);
@@ -215,7 +224,12 @@ async function route(req, res) {
     }
     const result = await handleMessages(body);
     if (result.stream) {
+      // Same streaming tuning as /v1/chat/completions — see comment above.
+      req.socket?.setKeepAlive(true);
+      req.setTimeout(0);
+      res.socket?.setNoDelay(true);
       res.writeHead(result.status, { 'Access-Control-Allow-Origin': '*', ...result.headers });
+      res.flushHeaders?.();
       await result.handler(res);
     } else {
       json(res, result.status, result.body);

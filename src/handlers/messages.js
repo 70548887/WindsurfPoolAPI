@@ -481,7 +481,7 @@ class AnthropicStreamTransform {
     this.thinkingBlockIdx = this.nextBlockIdx++;
     this._sendEvent('content_block_start', {
       index: this.thinkingBlockIdx,
-      content_block: { type: 'thinking', thinking: '' },
+      content_block: { type: 'thinking', thinking: '', signature: '' },
     });
   }
 
@@ -708,6 +708,12 @@ export async function handleMessages(anthropicBody) {
     },
     async handler(realRes) {
       const wrapper = new AnthropicStreamTransform(realRes, requestedModel);
+      // Kick the stream open immediately so CC's UI leaves the "connecting"
+      // state even before upstream's first token arrives. Without this the
+      // client sits silent for the entire LS cold-start + Windsurf first-token
+      // window (often 8-15s on thinking models), which feels like it hung.
+      wrapper._startMessage();
+      wrapper._sendEvent('ping', {});
       try {
         await result.handler(wrapper);
       } catch (err) {

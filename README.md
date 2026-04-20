@@ -234,11 +234,6 @@ Access at `http://localhost:3003/dashboard`
   <img src="docs/screenshots/models.png" width="900" />
 </p>
 
-<p align="center">
-  <b>Experimental — Cascade reuse & model identity injection / 实验性功能</b><br/>
-  <img src="docs/screenshots/experimental.png" width="900" />
-</p>
-
 ---
 
 ## 🤖 Supported Models / 支持的模型

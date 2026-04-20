@@ -24,7 +24,7 @@ import {
 } from './tool-emulation.js';
 import { sanitizeText, PathSanitizeStream } from '../sanitize.js';
 
-const HEARTBEAT_MS = 15_000;
+const HEARTBEAT_MS = 5_000;
 const QUEUE_RETRY_MS = 1_000;
 const QUEUE_MAX_WAIT_MS = 30_000;
 
@@ -514,6 +514,10 @@ function streamResponse(id, created, model, modelKey, messages, cascadeMessages,
           abortController.abort();
         }
       });
+      // Immediate kick so the TCP layer flushes headers + first bytes to the
+      // client right away — otherwise SSE-over-keepalive clients (esp. CC) can
+      // sit in "connecting" state for the full cold-start duration.
+      if (!res.writableEnded) res.write(': ping\n\n');
       const send = (data) => {
         if (!res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`);
       };
