@@ -262,7 +262,16 @@ export async function handleChatCompletions(body) {
   // Non-stream: retry with a different account on model-not-available errors
   const tried = [];
   let lastErr = null;
-  const maxAttempts = 3;
+  // Dynamic: try every active account in the pool (capped at 10) so a
+  // large pool with many rate-limited accounts can still fall through
+  // to a free one. Was hardcoded 3 — in pools bigger than 3 with the
+  // first accounts rate-limited, healthy accounts were never reached
+  // even though they would have worked (issue #5).
+  const _msgChars = (messages || []).reduce((n, m) => {
+    const c = m?.content;
+    return n + (typeof c === 'string' ? c.length : Array.isArray(c) ? c.reduce((k, p) => k + (typeof p?.text === 'string' ? p.text.length : 0), 0) : 0);
+  }, 0);
+  const maxAttempts = Math.min(10, Math.max(3, getAccountList().filter(a => a.status === 'active').length));
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     let acct = null;
     if (reuseEntry && attempt === 0) {
@@ -305,14 +314,14 @@ export async function handleChatCompletions(body) {
       log.info('Chat: cascade reuse skipped — LS port changed');
       reuseEntry = null;
     }
-    log.info(`Chat: model=${displayModel} flow=${useCascade ? 'cascade' : 'legacy'} attempt=${attempt + 1} account=${acct.email} ls=${ls.port}${reuseEntry ? ' reuse=1' : ''}${emulateTools ? ' tools=emu' : ''}`);
+    log.info(`Chat: model=${displayModel} flow=${useCascade ? 'cascade' : 'legacy'} attempt=${attempt + 1} account=${acct.email} ls=${ls.port} turns=${(messages||[]).length} chars=${_msgChars}${reuseEntry ? ' reuse=1' : ''}${emulateTools ? ' tools=emu' : ''}`);
     const client = new WindsurfClient(acct.apiKey, ls.port, ls.csrfToken);
     const result = await nonStreamResponse(
       client, chatId, created, displayModel, modelKey, messages, cascadeMessages, modelEnum, modelUid,
       useCascade, acct.apiKey, ckey,
       reuseEnabled ? { reuseEntry, lsPort: ls.port, apiKey: acct.apiKey } : null,
       emulateTools, toolPreamble,
-      source, creditMultiplier,
+      source, creditMultiplier, _msgChars,
     );
     if (result.status === 200) return result;
     reuseEntry = null; // don't try to reuse on the retry
@@ -328,7 +337,13 @@ export async function handleChatCompletions(body) {
       log.warn(`Account ${acct.email} cannot serve ${displayModel}, trying next account`);
       continue;
     }
-    break; // other errors (502, transport) — don't retry
+    // Transport / LS crash errors: retry if LS died mid-request
+    if (errType === 'upstream_error' || errType === 'ls_unavailable') {
+      log.warn(`Transport error on ${displayModel} (${errType}), retrying with fresh LS`);
+      await new Promise(r => setTimeout(r, 2000)); // wait for LS auto-restart
+      continue;
+    }
+    break; // other errors — don't retry
   }
   // If all accounts exhausted, check if it's because they're all rate-limited
   if (!lastErr || lastErr.status === 429) {
@@ -340,7 +355,7 @@ export async function handleChatCompletions(body) {
   return lastErr || { status: 503, body: { error: { message: 'No active accounts available', type: 'pool_exhausted' } } };
 }
 
-async function nonStreamResponse(client, id, created, model, modelKey, messages, cascadeMessages, modelEnum, modelUid, useCascade, apiKey, ckey, poolCtx, emulateTools, toolPreamble, source = 'POST /v1/chat/completions', creditMultiplier = 0) {
+async function nonStreamResponse(client, id, created, model, modelKey, messages, cascadeMessages, modelEnum, modelUid, useCascade, apiKey, ckey, poolCtx, emulateTools, toolPreamble, source = 'POST /v1/chat/completions', creditMultiplier = 0, _msgChars = 0) {
   const startTime = Date.now();
   try {
     let allText = '';
@@ -487,6 +502,18 @@ async function nonStreamResponse(client, id, created, model, modelKey, messages,
       return {
         status: 429,
         body: { error: { message: `${model} 已达速率限制，请稍后重试`, type: 'rate_limit_exceeded', retry_after_ms: rl.retryAfterMs || 60000 } },
+      };
+    }
+    // LS crash on oversized payload — gRPC surfaces this as "pending stream
+    // has been canceled" within a second. Give the user an actionable hint.
+    const isStreamCanceled = /pending stream has been canceled|panel state|ECONNRESET/i.test(err.message);
+    if (isStreamCanceled && _msgChars > 500_000) {
+      return {
+        status: 413,
+        body: { error: {
+          message: `请求过大（${Math.round(_msgChars / 1024)}KB 输入）导致语言服务器中断。请尝试：1) 分块发送；2) 先用摘要/summarization 预处理 PDF；3) 减少历史轮数`,
+          type: 'payload_too_large',
+        } },
       };
     }
     return {

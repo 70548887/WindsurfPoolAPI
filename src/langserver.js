@@ -27,6 +27,10 @@ const _pool = new Map();
 let _nextPort = DEFAULT_PORT + 1;
 let _binaryPath = DEFAULT_BINARY;
 let _apiServerUrl = DEFAULT_API_URL;
+// Auto-restart tracking: key -> { count, lastRestart }
+const _restartTracker = new Map();
+const MAX_AUTO_RESTARTS = 50;
+const RESTART_COOLDOWN_MS = 3000;
 
 function proxyKey(proxy) {
   if (!proxy || !proxy.host) return 'default';
@@ -98,6 +102,8 @@ export async function ensureLs(proxy = null) {
   try { mkdirSync(`${dataDir}/db`, { recursive: true }); } catch {}
 
   const args = [
+    '--run_child',
+    '--limit_go_max_procs', '4',
     `--api_server_url=${_apiServerUrl}`,
     `--server_port=${port}`,
     `--csrf_token=${DEFAULT_CSRF}`,
@@ -145,6 +151,25 @@ export async function ensureLs(proxy = null) {
     _pool.delete(key);
     if (gone?.port) {
       import('./conversation-pool.js').then(m => m.invalidateFor({ lsPort: gone.port })).catch(() => {});
+    }
+    // Auto-restart on unexpected exit (not from manual stop/SIGTERM)
+    if (signal !== 'SIGTERM' && signal !== 'SIGKILL') {
+      const tracker = _restartTracker.get(key) || { count: 0, lastRestart: 0 };
+      const now = Date.now();
+      if (tracker.count >= MAX_AUTO_RESTARTS) {
+        log.error(`LS instance ${key} exceeded max auto-restarts (${MAX_AUTO_RESTARTS}), giving up`);
+        return;
+      }
+      const delay = Math.max(RESTART_COOLDOWN_MS, RESTART_COOLDOWN_MS - (now - tracker.lastRestart));
+      tracker.count++;
+      tracker.lastRestart = now;
+      _restartTracker.set(key, tracker);
+      log.info(`Auto-restarting LS instance ${key} (restart #${tracker.count}) in ${delay}ms...`);
+      setTimeout(() => {
+        ensureLs(proxy).catch(err => {
+          log.error(`Failed to auto-restart LS instance ${key}: ${err.message}`);
+        });
+      }, delay);
     }
   });
   proc.on('error', (err) => {

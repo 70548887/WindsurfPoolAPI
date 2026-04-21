@@ -7,7 +7,12 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "check": "find src -name '*.js' -type f -exec node --check {} +"
+    "check": "find src -name '*.js' -type f -exec node --check {} +",
+    "test": "node --test test/unit/*.test.js test/regression/*.test.js",
+    "test:unit": "node --test test/unit/*.test.js",
+    "test:regression": "node --test test/regression/*.test.js",
+    "test:integration": "node --test test/integration/*.test.js",
+    "test:all": "node --test test/**/*.test.js"
   },
   "keywords": [
     "windsurf",

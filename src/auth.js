@@ -12,7 +12,7 @@ import { randomUUID } from 'crypto';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { config, log } from './config.js';
 import { getEffectiveProxy } from './dashboard/proxy-config.js';
-import { getTierModels } from './models.js';
+import { getTierModels, MODELS } from './models.js';
 
 import { join } from 'path';
 const ACCOUNTS_FILE = join(process.cwd(), 'accounts.json');
@@ -259,9 +259,15 @@ export function setAccountBlockedModels(id, blockedModels) {
  * Resolve whether `modelKey` is callable on this account:
  *   tier entitlement ∩ (models.js catalog) − account.blockedModels
  */
+/**
+ * Resolve whether `modelKey` is callable on this account.
+ *
+ * 2026-04-21: Removed local tier-based filtering.  The Windsurf backend is the
+ * authoritative source for entitlement — the local tier cache is frequently
+ * stale (e.g. showing "free" when the token actually carries PRO access).
+ * We now only honour the explicit per-account blocklist (admin-managed).
+ */
 export function isModelAllowedForAccount(account, modelKey) {
-  const tierModels = getTierModels(account.tier || 'unknown');
-  if (!tierModels.includes(modelKey)) return false;
   const blocked = account.blockedModels || [];
   if (blocked.includes(modelKey)) return false;
   return true;
@@ -269,9 +275,9 @@ export function isModelAllowedForAccount(account, modelKey) {
 
 /** List of model keys this account is currently allowed to call. */
 export function getAvailableModelsForAccount(account) {
-  const tierModels = getTierModels(account.tier || 'unknown');
+  const allKeys = Object.keys(MODELS);
   const blocked = new Set(account.blockedModels || []);
-  return tierModels.filter(m => !blocked.has(m));
+  return allKeys.filter(m => !blocked.has(m));
 }
 
 /**
@@ -671,7 +677,7 @@ export function updateCapability(apiKey, modelKey, ok, reason = '') {
     lastCheck: Date.now(),
     reason,
   };
-  account.tier = inferTier(account.capabilities);
+  if (!account.tierManual) account.tier = inferTier(account.capabilities);
   saveAccounts();
 }
 
