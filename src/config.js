@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -69,7 +69,66 @@ export const config = {
 
   // Dashboard
   dashboardPassword: process.env.DASHBOARD_PASSWORD || '',
+
+  // Context trimming / memory
+  contextTrimEnabled: (process.env.CONTEXT_TRIM_ENABLED || 'true').toLowerCase() === 'true',
+  contextTrimThreshold: parseInt(process.env.CONTEXT_TRIM_THRESHOLD || '12', 10),
+  contextTrimKeepRecent: parseInt(process.env.CONTEXT_TRIM_KEEP_RECENT || '5', 10),
+  contextTrimSummaryEnabled: (process.env.CONTEXT_TRIM_SUMMARY_ENABLED || 'true').toLowerCase() === 'true',
+  contextTrimSummaryModel: process.env.CONTEXT_TRIM_SUMMARY_MODEL || 'gpt-4o-mini',
+  contextMemoryTtlHours: parseInt(process.env.CONTEXT_MEMORY_TTL_HOURS || '24', 10),
 };
+
+/**
+ * 动态更新配置项并持久化到 .env 文件
+ * @param {string} envKey - 环境变量名（如 'DASHBOARD_PASSWORD', 'API_KEY'）
+ * @param {string} value - 新值
+ */
+export function updateConfig(envKey, value) {
+    const keyMap = {
+        'DASHBOARD_PASSWORD': 'dashboardPassword',
+        'API_KEY': 'apiKey',
+        'CONTEXT_TRIM_ENABLED': 'contextTrimEnabled',
+        'CONTEXT_TRIM_THRESHOLD': 'contextTrimThreshold',
+        'CONTEXT_TRIM_KEEP_RECENT': 'contextTrimKeepRecent',
+        'CONTEXT_TRIM_SUMMARY_ENABLED': 'contextTrimSummaryEnabled',
+        'CONTEXT_TRIM_SUMMARY_MODEL': 'contextTrimSummaryModel',
+        'CONTEXT_MEMORY_TTL_HOURS': 'contextMemoryTtlHours'
+    };
+
+    const configKey = keyMap[envKey];
+    if (!configKey) throw new Error('Unsupported config key: ' + envKey);
+
+    // 1. 更新内存中的 config (with type coercion for non-string values)
+    const boolKeys = ['contextTrimEnabled', 'contextTrimSummaryEnabled'];
+    const intKeys = ['contextTrimThreshold', 'contextTrimKeepRecent', 'contextMemoryTtlHours'];
+    if (boolKeys.includes(configKey)) {
+        config[configKey] = String(value).toLowerCase() === 'true';
+    } else if (intKeys.includes(configKey)) {
+        config[configKey] = parseInt(value, 10);
+    } else {
+        config[configKey] = value;
+    }
+
+    // 2. 持久化到 .env 文件
+    const envPath = resolve(ROOT, '.env');
+
+    let envContent = '';
+    try {
+        envContent = readFileSync(envPath, 'utf-8');
+    } catch (e) {
+        envContent = '';
+    }
+
+    const regex = new RegExp('^' + envKey + '=.*$', 'm');
+    if (regex.test(envContent)) {
+        envContent = envContent.replace(regex, envKey + '=' + value);
+    } else {
+        envContent += '\n' + envKey + '=' + value;
+    }
+
+    writeFileSync(envPath, envContent, 'utf-8');
+}
 
 const levels = { debug: 0, info: 1, warn: 2, error: 3 };
 const currentLevel = levels[config.logLevel] ?? 1;

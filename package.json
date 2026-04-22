@@ -38,5 +38,8 @@
   "bugs": {
     "url": "https://github.com/guanxiaol/WindsurfPoolAPI/issues"
   },
-  "homepage": "https://github.com/guanxiaol/WindsurfPoolAPI#readme"
+  "homepage": "https://github.com/guanxiaol/WindsurfPoolAPI#readme",
+  "dependencies": {
+    "better-sqlite3": "^12.9.0"
+  }
 }

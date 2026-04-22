@@ -3,7 +3,7 @@
  * All routes are under /dashboard/api/*.
  */
 
-import { config, log } from '../config.js';
+import { config, log, updateConfig } from '../config.js';
 import {
   getAccountList, getAccountCount, addAccountByKey, addAccountByToken,
   removeAccount, setAccountStatus, resetAccountErrors, updateAccountLabel,
@@ -24,6 +24,7 @@ import { MODELS, MODEL_TIER_ACCESS as _TIER_TABLE, getTierModels as _getTierMode
 import { windsurfLogin, refreshFirebaseToken, reRegisterWithCodeium } from './windsurf-login.js';
 import { getModelAccessConfig, setModelAccessMode, setModelAccessList, addModelToList, removeModelFromList } from './model-access.js';
 import { checkMessageRateLimit } from '../windsurf-api.js';
+import { getContextMemoryOverview, getActiveConversations, getRecentTrimEvents, deleteMemory, getTrimStats } from '../context-db.js';
 
 function json(res, status, body) {
   const data = JSON.stringify(body);
@@ -534,6 +535,105 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
     } catch (err) {
       return json(res, 400, { error: err.message });
     }
+  }
+
+  // ─── Settings ───────────────────────────────────────
+  // PUT /settings/password — change dashboard password
+  if (subpath === '/settings/password' && method === 'PUT') {
+    if (!body.oldPassword || !body.newPassword) {
+      return json(res, 400, { error: '请提供旧密码和新密码' });
+    }
+    if (body.newPassword.length < 6) {
+      return json(res, 400, { error: '新密码长度不能少于6位' });
+    }
+    const currentPw = config.dashboardPassword || config.apiKey || '';
+    if (body.oldPassword !== currentPw) {
+      return json(res, 403, { error: '旧密码不正确' });
+    }
+    updateConfig('DASHBOARD_PASSWORD', body.newPassword);
+    return json(res, 200, { success: true, message: '密码修改成功' });
+  }
+
+  // GET /settings/api-key — get masked API key status
+  if (subpath === '/settings/api-key' && method === 'GET') {
+    const apiKey = config.apiKey || '';
+    return json(res, 200, {
+      enabled: !!apiKey,
+      apiKey: apiKey ? apiKey.substring(0, 8) + '****' + apiKey.substring(apiKey.length - 4) : ''
+    });
+  }
+
+  // PUT /settings/api-key — update API key
+  if (subpath === '/settings/api-key' && method === 'PUT') {
+    if (!body.apiKey || body.apiKey.length < 8) {
+      return json(res, 400, { error: 'API Key 长度不能少于8位' });
+    }
+    updateConfig('API_KEY', body.apiKey);
+    return json(res, 200, { success: true, message: 'API Key 已更新' });
+  }
+
+  // DELETE /settings/api-key — clear API key
+  if (subpath === '/settings/api-key' && method === 'DELETE') {
+    updateConfig('API_KEY', '');
+    return json(res, 200, { success: true, message: 'API Key 已清除，接口恢复开放访问' });
+  }
+
+  // ─── Context Memory ─────────────────────────────────
+  // GET /context-memory/stats — trimming statistics overview
+  if (subpath === '/context-memory/stats' && method === 'GET') {
+    const overview = getContextMemoryOverview();
+    const recentEvents = getRecentTrimEvents();
+    return json(res, 200, { ...overview, recentEvents });
+  }
+
+  // GET /context-memory/conversations — active conversation list
+  if (subpath === '/context-memory/conversations' && method === 'GET') {
+    const conversations = getActiveConversations();
+    return json(res, 200, { conversations });
+  }
+
+  // DELETE /context-memory/:conversationId — delete conversation memory
+  const ctxMemDel = subpath.match(/^\/context-memory\/([^/]+)$/);
+  if (ctxMemDel && method === 'DELETE') {
+    deleteMemory(ctxMemDel[1]);
+    return json(res, 200, { ok: true });
+  }
+
+  // PUT /settings/context-trim — update context management config
+  if (subpath === '/settings/context-trim' && method === 'PUT') {
+    try {
+      if (body.enabled !== undefined) updateConfig('CONTEXT_TRIM_ENABLED', String(body.enabled));
+      if (body.threshold !== undefined) updateConfig('CONTEXT_TRIM_THRESHOLD', String(body.threshold));
+      if (body.keepRecent !== undefined) updateConfig('CONTEXT_TRIM_KEEP_RECENT', String(body.keepRecent));
+      if (body.summaryEnabled !== undefined) updateConfig('CONTEXT_TRIM_SUMMARY_ENABLED', String(body.summaryEnabled));
+      if (body.summaryModel !== undefined) updateConfig('CONTEXT_TRIM_SUMMARY_MODEL', body.summaryModel);
+      if (body.memoryTtlHours !== undefined) updateConfig('CONTEXT_MEMORY_TTL_HOURS', String(body.memoryTtlHours));
+      return json(res, 200, {
+        success: true,
+        config: {
+          contextTrimEnabled: config.contextTrimEnabled,
+          contextTrimThreshold: config.contextTrimThreshold,
+          contextTrimKeepRecent: config.contextTrimKeepRecent,
+          contextTrimSummaryEnabled: config.contextTrimSummaryEnabled,
+          contextTrimSummaryModel: config.contextTrimSummaryModel,
+          contextMemoryTtlHours: config.contextMemoryTtlHours,
+        }
+      });
+    } catch (err) {
+      return json(res, 400, { error: err.message });
+    }
+  }
+
+  // GET /settings/context-trim — read current context trim config
+  if (subpath === '/settings/context-trim' && method === 'GET') {
+    return json(res, 200, {
+      contextTrimEnabled: config.contextTrimEnabled,
+      contextTrimThreshold: config.contextTrimThreshold,
+      contextTrimKeepRecent: config.contextTrimKeepRecent,
+      contextTrimSummaryEnabled: config.contextTrimSummaryEnabled,
+      contextTrimSummaryModel: config.contextTrimSummaryModel,
+      contextMemoryTtlHours: config.contextMemoryTtlHours,
+    });
   }
 
   json(res, 404, { error: `Dashboard API: ${method} ${subpath} not found` });

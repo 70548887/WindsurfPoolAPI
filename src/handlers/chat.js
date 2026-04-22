@@ -23,6 +23,7 @@ import {
   buildToolPreambleForProto,
 } from './tool-emulation.js';
 import { sanitizeText, PathSanitizeStream } from '../sanitize.js';
+import { deriveConversationId, processContext, postResponseHook } from '../context-manager.js';
 
 const HEARTBEAT_MS = 5_000;
 const QUEUE_RETRY_MS = 1_000;
@@ -149,6 +150,7 @@ export async function handleChatCompletions(body) {
   const modelInfo = getModelInfo(modelKey);
   const displayModel = modelInfo?.name || reqModel || config.defaultModel;
   const creditMultiplier = modelInfo?.credit || 0;
+  const _internal = body._internal || false;
   const source = body._source || 'POST /v1/chat/completions';
   const modelEnum = modelInfo?.enumValue || 0;
   const modelUid = modelInfo?.modelUid || null;
@@ -221,12 +223,31 @@ export async function handleChatCompletions(body) {
   const created = Math.floor(Date.now() / 1000);
   const ckey = cacheKey(body);
 
+  // ── Context trimming (智能上下文管理) ──
+  // Must run BEFORE the stream branch so both stream and non-stream paths
+  // get trimmed messages and valid _convId / contextTrimmed values.
+  let contextTrimmed = false;
+  let _convId = null;
+  if (!_internal && config.contextTrimEnabled) {
+    _convId = deriveConversationId(cascadeMessages);
+    try {
+      const trimResult = await processContext(cascadeMessages, _convId);
+      if (trimResult.trimmed) {
+        cascadeMessages = trimResult.messages;
+        contextTrimmed = true;
+        log.info(`Context trimmed: ${messages.length} -> ${cascadeMessages.length} msgs (strategy=${trimResult.strategy}) convId=${_convId}`);
+      }
+    } catch (trimErr) {
+      log.warn('Context trimming failed, proceeding with original messages:', trimErr.message);
+    }
+  }
+
   if (stream) {
-    return streamResponse(chatId, created, displayModel, modelKey, messages, cascadeMessages, modelEnum, modelUid, useCascade, ckey, emulateTools, toolPreamble, source, creditMultiplier);
+    return streamResponse(chatId, created, displayModel, modelKey, messages, cascadeMessages, modelEnum, modelUid, useCascade, ckey, emulateTools, toolPreamble, source, creditMultiplier, _convId, contextTrimmed, _internal);
   }
 
   // ── Local response cache (exact body match) ─────────────
-  const cached = cacheGet(ckey);
+  const cached = !_internal && cacheGet(ckey);
   if (cached) {
     log.info(`Chat: cache HIT model=${displayModel} flow=non-stream`);
     recordRequest({
@@ -254,7 +275,7 @@ export async function handleChatCompletions(body) {
   // Tool-emulation mode bypasses the reuse pool: fingerprint can't stably
   // collapse a conversation whose assistant turns contain synthesised
   // <tool_call> markup and whose user turns contain <tool_result> wrappers.
-  const reuseEnabled = useCascade && !emulateTools && isExperimentalEnabled('cascadeConversationReuse');
+  const reuseEnabled = !_internal && useCascade && !emulateTools && isExperimentalEnabled('cascadeConversationReuse');
   const fpBefore = reuseEnabled ? fingerprintBefore(messages) : null;
   let reuseEntry = reuseEnabled ? poolCheckout(fpBefore) : null;
   if (reuseEntry) log.info(`Chat: cascade reuse HIT cascadeId=${reuseEntry.cascadeId.slice(0, 8)}… model=${displayModel}`);
@@ -290,7 +311,7 @@ export async function handleChatCompletions(body) {
 
     // Pre-flight rate limit check (experimental): ask server.codeium.com if
     // this account still has message capacity before burning an LS round trip.
-    if (isExperimentalEnabled('preflightRateLimit')) {
+    if (!_internal && isExperimentalEnabled('preflightRateLimit')) {
       try {
         const px = getEffectiveProxy(acct.id) || null;
         const rl = await checkMessageRateLimit(acct.apiKey, px);
@@ -322,6 +343,7 @@ export async function handleChatCompletions(body) {
       reuseEnabled ? { reuseEntry, lsPort: ls.port, apiKey: acct.apiKey } : null,
       emulateTools, toolPreamble,
       source, creditMultiplier, _msgChars,
+      _convId, contextTrimmed,
     );
     if (result.status === 200) return result;
     reuseEntry = null; // don't try to reuse on the retry
@@ -355,7 +377,7 @@ export async function handleChatCompletions(body) {
   return lastErr || { status: 503, body: { error: { message: 'No active accounts available', type: 'pool_exhausted' } } };
 }
 
-async function nonStreamResponse(client, id, created, model, modelKey, messages, cascadeMessages, modelEnum, modelUid, useCascade, apiKey, ckey, poolCtx, emulateTools, toolPreamble, source = 'POST /v1/chat/completions', creditMultiplier = 0, _msgChars = 0) {
+async function nonStreamResponse(client, id, created, model, modelKey, messages, cascadeMessages, modelEnum, modelUid, useCascade, apiKey, ckey, poolCtx, emulateTools, toolPreamble, source = 'POST /v1/chat/completions', creditMultiplier = 0, _msgChars = 0, _convId = null, contextTrimmed = false) {
   const startTime = Date.now();
   try {
     let allText = '';
@@ -471,6 +493,13 @@ async function nonStreamResponse(client, id, created, model, modelKey, messages,
     // the trajectory didn't include a ModelUsageStats field.
     const usage = buildUsageBody(serverUsage, messages, allText, allThinking);
     const finishReason = toolCalls.length ? 'tool_calls' : 'stop';
+
+    // Post-response: 异步更新上下文记忆
+    if (_convId && (contextTrimmed || messages.length > 8)) {
+      const _assistantText = allText || '';
+      setImmediate(() => postResponseHook(_convId, messages, _assistantText).catch(e => log.debug('postResponseHook error:', e.message)));
+    }
+
     return {
       status: 200,
       body: {
@@ -523,7 +552,7 @@ async function nonStreamResponse(client, id, created, model, modelKey, messages,
   }
 }
 
-function streamResponse(id, created, model, modelKey, messages, cascadeMessages, modelEnum, modelUid, useCascade, ckey, emulateTools, toolPreamble, source = 'POST /v1/chat/completions', creditMultiplier = 0) {
+function streamResponse(id, created, model, modelKey, messages, cascadeMessages, modelEnum, modelUid, useCascade, ckey, emulateTools, toolPreamble, source = 'POST /v1/chat/completions', creditMultiplier = 0, _convId = null, contextTrimmed = false, _internal = false) {
   return {
     status: 200,
     stream: true,
@@ -560,7 +589,7 @@ function streamResponse(id, created, model, modelKey, messages, cascadeMessages,
       res.on('close', stopHeartbeat);
 
       // ── Cache hit: replay stored response as a fake stream ──
-      const cached = cacheGet(ckey);
+      const cached = !_internal && cacheGet(ckey);
       if (cached) {
         log.info(`Chat: cache HIT model=${model} flow=stream`);
         recordRequest({
@@ -603,7 +632,7 @@ function streamResponse(id, created, model, modelKey, messages, cascadeMessages,
       // Cascade conversation pool (experimental, stream path) — bypassed in
       // tool-emulation mode because the fingerprint can't collapse turns
       // whose bodies carry <tool_call>/<tool_result> markup.
-      const reuseEnabled = useCascade && !emulateTools && isExperimentalEnabled('cascadeConversationReuse');
+      const reuseEnabled = !_internal && useCascade && !emulateTools && isExperimentalEnabled('cascadeConversationReuse');
       const fpBefore = reuseEnabled ? fingerprintBefore(messages) : null;
       let reuseEntry = reuseEnabled ? poolCheckout(fpBefore) : null;
       if (reuseEntry) log.info(`Chat: cascade reuse HIT cascadeId=${reuseEntry.cascadeId.slice(0, 8)}… stream model=${model}`);
@@ -701,7 +730,7 @@ function streamResponse(id, created, model, modelKey, messages, cascadeMessages,
           currentApiKey = acct.apiKey;
 
           // Pre-flight rate limit check (experimental)
-          if (isExperimentalEnabled('preflightRateLimit')) {
+          if (!_internal && isExperimentalEnabled('preflightRateLimit')) {
             try {
               const px = getEffectiveProxy(acct.id) || null;
               const rl = await checkMessageRateLimit(acct.apiKey, px);
@@ -800,6 +829,10 @@ function streamResponse(id, created, model, modelKey, messages, cascadeMessages,
                 choices: [], usage });
             }
             if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+            // Post-response: 异步更新上下文记忆 (stream)
+            if (_convId && (contextTrimmed || messages.length > 8)) {
+              setImmediate(() => postResponseHook(_convId, messages, accText || '').catch(e => log.debug('postResponseHook error:', e.message)));
+            }
             if (ckey && !collectedToolCalls.length && (accText || accThinking)) {
               cacheSet(ckey, { text: accText, thinking: accThinking });
             }
