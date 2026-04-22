@@ -10,6 +10,8 @@ import {
   recordTrimStats,
   deleteMemory,
   closeDb,
+  saveAuditLog,
+  getAuditLogs,
 } from '../../src/context-db.js';
 import { config } from '../../src/config.js';
 
@@ -107,5 +109,75 @@ describe('Dashboard Context Memory API', () => {
     const req = mockReq('/dashboard/api/context-memory/stats');
     await handleDashboardApi('OPTIONS', '/context-memory/stats', {}, req, res);
     assert.strictEqual(res._status, 204);
+  });
+
+  // ─── V2 新增端点测试 ───────────────────────────────────
+
+  // GET /context-memory/audit-logs
+  it('GET /context-memory/audit-logs should return audit logs array', async () => {
+    // 先插入一条审计记录
+    saveAuditLog('dash_audit_test', 'hash_test', '[]', 3, 'semantic_chunked');
+
+    const res = mockRes();
+    const req = mockReq('/dashboard/api/context-memory/audit-logs');
+    await handleDashboardApi('GET', '/context-memory/audit-logs', null, req, res);
+    assert.strictEqual(res._status, 200);
+    assert.ok(res._body.auditLogs);
+    assert.ok(Array.isArray(res._body.auditLogs));
+    assert.ok(res._body.auditLogs.length >= 1, 'should have at least the inserted audit log');
+  });
+
+  // POST /context-memory/rollback/:auditId - 成功
+  it('POST /context-memory/rollback/:auditId should rollback successfully', async () => {
+    saveAuditLog('dash_rollback_test', 'hash_rb', '[]', 2, 'test');
+    const logs = getAuditLogs('dash_rollback_test');
+    const auditId = logs[0].id;
+
+    const res = mockRes();
+    const req = mockReq('/dashboard/api/context-memory/rollback/' + auditId);
+    await handleDashboardApi('POST', '/context-memory/rollback/' + auditId, null, req, res);
+    assert.strictEqual(res._status, 200);
+    assert.ok(res._body.success);
+  });
+
+  // POST /context-memory/rollback/invalid - 错误处理
+  it('POST /context-memory/rollback/invalid should handle invalid rollback id', async () => {
+    const res = mockRes();
+    const req = mockReq('/dashboard/api/context-memory/rollback/invalid');
+    await handleDashboardApi('POST', '/context-memory/rollback/invalid', null, req, res);
+    // parseInt('invalid') => NaN => returns 400 { error: 'Invalid audit ID' }
+    assert.strictEqual(res._status, 400);
+    assert.ok(res._body.error);
+  });
+
+  // GET /context-memory/embedding-status
+  it('GET /context-memory/embedding-status should return embedding model status', async () => {
+    const res = mockRes();
+    const req = mockReq('/dashboard/api/context-memory/embedding-status');
+    await handleDashboardApi('GET', '/context-memory/embedding-status', null, req, res);
+    assert.strictEqual(res._status, 200);
+    assert.ok(res._body.status);
+    assert.ok(['ready', 'loading', 'failed', 'idle'].includes(res._body.status));
+  });
+
+  // PUT /settings/context-trim V2 config fields
+  it('PUT /settings/context-trim should accept V2 config fields', async () => {
+    const body = {
+      semanticEnabled: true,
+      chunkSize: 2000,
+      auditEnabled: true,
+    };
+    const res = mockRes();
+    const req = mockReq('/dashboard/api/settings/context-trim');
+    await handleDashboardApi('PUT', '/settings/context-trim', body, req, res);
+    assert.strictEqual(res._status, 200);
+    assert.ok(res._body.success || res._body.config);
+
+    // 验证配置已更新
+    const res2 = mockRes();
+    const req2 = mockReq('/dashboard/api/settings/context-trim');
+    await handleDashboardApi('GET', '/settings/context-trim', null, req2, res2);
+    assert.strictEqual(res2._status, 200);
+    assert.strictEqual(res2._body.contextTrimChunkSize, 2000);
   });
 });

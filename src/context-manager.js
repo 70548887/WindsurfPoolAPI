@@ -110,6 +110,11 @@ function _legacyStructuralTrim(messages, targetCount) {
 export { _legacyScoreMessage as scoreMessage };
 export { _legacyStructuralTrim as structuralTrim };
 
+// V2 函数测试导出
+export { semanticTrim as _testSemanticTrim };
+export { chunkedSummarize as _testChunkedSummarize };
+export { chunkedMergeSummary as _testChunkedMergeSummary };
+
 // ── V2 语义评分 + 降级逻辑 ──
 async function scoredMessages(messages, convId) {
   if (config.contextTrimSemanticEnabled !== false && isModelReady()) {

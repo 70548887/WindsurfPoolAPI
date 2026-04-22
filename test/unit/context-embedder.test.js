@@ -139,3 +139,120 @@ describe('batchEmbed (requires model)', () => {
     }
   });
 });
+
+// ─── computeSalienceScores ───────────────────────────────
+describe('computeSalienceScores', () => {
+  // 1. 基本结构验证
+  it('should return array with same length as input messages', async () => {
+    const messages = [
+      { role: 'system', content: 'You are helpful.' },
+      { role: 'user', content: 'Hello' },
+      { role: 'assistant', content: 'Hi there' },
+    ];
+    const result = await computeSalienceScores(messages, 'test_conv_scores');
+    assert.strictEqual(result.length, messages.length);
+  });
+
+  // 2. system 消息强制保护
+  it('should assign score 999 to system messages', async () => {
+    const messages = [
+      { role: 'system', content: 'System prompt' },
+      { role: 'user', content: 'Hello' },
+      { role: 'assistant', content: 'Hi' },
+    ];
+    const result = await computeSalienceScores(messages, 'test_conv_sys');
+    const sysScore = result.find(r => r.message.role === 'system');
+    assert.strictEqual(sysScore.score, 999);
+  });
+
+  // 3. 最近 keepRecent 条消息强制保护
+  it('should assign score 999 to recent messages within keepRecent', async () => {
+    const messages = [];
+    messages.push({ role: 'system', content: 'System' });
+    for (let i = 0; i < 14; i++) {
+      messages.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: 'msg ' + i });
+    }
+    const result = await computeSalienceScores(messages, 'test_conv_recent');
+    // 最后 keepRecent (默认 5*2=10) 条应该是 999
+    const lastN = result.slice(-10);
+    for (const item of lastN) {
+      assert.strictEqual(item.score, 999, 'Message at index ' + item.index + ' should be protected');
+    }
+  });
+
+  // 4. 返回结构验证
+  it('should return objects with index, score, message fields', async () => {
+    const messages = [
+      { role: 'user', content: 'test' },
+      { role: 'assistant', content: 'response' },
+    ];
+    const result = await computeSalienceScores(messages, 'test_conv_struct');
+    for (const item of result) {
+      assert.ok('index' in item, 'should have index');
+      assert.ok('score' in item, 'should have score');
+      assert.ok('message' in item, 'should have message');
+      assert.strictEqual(typeof item.score, 'number');
+    }
+  });
+
+  // 5. 空消息数组
+  it('should return empty array for empty messages', async () => {
+    const result = await computeSalienceScores([], 'test_conv_empty');
+    assert.strictEqual(result.length, 0);
+  });
+
+  // 6. 无 user 消息时的降级
+  it('should handle messages with no user role (degraded scoring)', async () => {
+    const messages = [
+      { role: 'system', content: 'System' },
+      { role: 'assistant', content: 'Hello' },
+      { role: 'assistant', content: 'World' },
+    ];
+    const result = await computeSalienceScores(messages, 'test_conv_nouser');
+    assert.strictEqual(result.length, 3);
+    // system 仍应该是 999
+    assert.strictEqual(result[0].score, 999);
+    // 其他消息应有非零分数
+    for (const item of result.slice(1)) {
+      assert.ok(typeof item.score === 'number');
+    }
+  });
+
+  // 7. score 值在合理范围内（非保护消息应在 0-1 之间）
+  it('should produce scores between 0 and 1 for non-protected messages', async () => {
+    const messages = [
+      { role: 'system', content: 'System' },
+      { role: 'user', content: 'First question about sorting' },
+      { role: 'assistant', content: 'Here is a sort algorithm' },
+      { role: 'user', content: 'Second question about databases' },
+      { role: 'assistant', content: 'Here is database info' },
+      { role: 'user', content: 'Third about authentication' },
+      { role: 'assistant', content: 'Auth details here' },
+      { role: 'user', content: 'Fourth about testing' },
+      { role: 'assistant', content: 'Testing info' },
+      { role: 'user', content: 'Fifth about deployment' },
+      { role: 'assistant', content: 'Deploy info' },
+      { role: 'user', content: 'Latest question about auth bug' },
+    ];
+    const result = await computeSalienceScores(messages, 'test_conv_range');
+    const nonProtected = result.filter(r => r.score < 999);
+    for (const item of nonProtected) {
+      assert.ok(item.score >= 0, 'Score ' + item.score + ' should be >= 0');
+      assert.ok(item.score <= 1.0, 'Score ' + item.score + ' should be <= 1.0');
+    }
+  });
+
+  // 8. index 与原始消息位置对应
+  it('should preserve correct index mapping', async () => {
+    const messages = [
+      { role: 'user', content: 'Hello' },
+      { role: 'assistant', content: 'Hi' },
+      { role: 'user', content: 'Bye' },
+    ];
+    const result = await computeSalienceScores(messages, 'test_conv_idx');
+    for (let i = 0; i < result.length; i++) {
+      assert.strictEqual(result[i].index, i);
+      assert.deepStrictEqual(result[i].message, messages[i]);
+    }
+  });
+});

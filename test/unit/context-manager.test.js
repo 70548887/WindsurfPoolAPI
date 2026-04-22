@@ -10,6 +10,9 @@ import {
   processContext,
   postResponseHook,
   rollbackTrim,
+  _testSemanticTrim as semanticTrim,
+  _testChunkedSummarize as chunkedSummarize,
+  _testChunkedMergeSummary as chunkedMergeSummary,
 } from '../../src/context-manager.js';
 import { config } from '../../src/config.js';
 import { closeDb, getRecentMessages, deleteMemory, saveAuditLog, getAuditLogs } from '../../src/context-db.js';
@@ -402,5 +405,162 @@ describe('processContext V2 strategies', () => {
     assert.ok(Array.isArray(result.messages));
     assert.ok(typeof result.trimmed === 'boolean');
     assert.ok(typeof result.strategy === 'string');
+  });
+});
+
+
+// ─── semanticTrim ─────────────────────────────────────────
+describe('semanticTrim', () => {
+  it('should return {kept, trimmedForSummary} structure', async () => {
+    const messages = [
+      { role: 'system', content: 'System' },
+      { role: 'user', content: 'q1' },
+      { role: 'assistant', content: 'a1' },
+      { role: 'user', content: 'q2' },
+      { role: 'assistant', content: 'a2' },
+      { role: 'user', content: 'q3' },
+      { role: 'assistant', content: 'a3' },
+      { role: 'user', content: 'q4' },
+      { role: 'assistant', content: 'a4' },
+      { role: 'user', content: 'q5' },
+      { role: 'assistant', content: 'a5' },
+      { role: 'user', content: 'q6' },
+      { role: 'assistant', content: 'a6' },
+      { role: 'user', content: 'q7' },
+    ];
+    const result = await semanticTrim(messages, 10, 'test_trim_struct');
+    assert.ok(Array.isArray(result.kept));
+    assert.ok(Array.isArray(result.trimmedForSummary));
+  });
+
+  it('should always keep system messages in kept', async () => {
+    const messages = [
+      { role: 'system', content: 'Important system prompt' },
+      ...Array.from({length: 14}, (_, i) => ({
+        role: i % 2 === 0 ? 'user' : 'assistant',
+        content: `message ${i}`
+      }))
+    ];
+    const result = await semanticTrim(messages, 10, 'test_trim_sys');
+    const keptRoles = result.kept.map(m => m.role);
+    assert.ok(keptRoles.includes('system'));
+  });
+
+  it('should keep recent messages within keepRecent range', async () => {
+    const messages = Array.from({length: 15}, (_, i) => ({
+      role: i === 0 ? 'system' : (i % 2 === 0 ? 'user' : 'assistant'),
+      content: `msg ${i}`
+    }));
+    const result = await semanticTrim(messages, 10, 'test_trim_recent');
+    const lastMsg = messages[messages.length - 1];
+    assert.ok(result.kept.includes(lastMsg) || 
+      result.kept.some(m => m.content === lastMsg.content));
+  });
+
+  it('should preserve tool_call chain integrity', async () => {
+    const messages = [
+      { role: 'system', content: 'System' },
+      { role: 'user', content: 'Search for files' },
+      { role: 'assistant', content: '', tool_calls: [{ id: 'tc_1', function: { name: 'search' } }] },
+      { role: 'tool', tool_call_id: 'tc_1', content: 'Found 3 files' },
+      { role: 'user', content: 'q2' },
+      { role: 'assistant', content: 'a2' },
+      { role: 'user', content: 'q3' },
+      { role: 'assistant', content: 'a3' },
+      { role: 'user', content: 'q4' },
+      { role: 'assistant', content: 'a4' },
+      { role: 'user', content: 'q5' },
+      { role: 'assistant', content: 'a5' },
+      { role: 'user', content: 'q6' },
+    ];
+    const result = await semanticTrim(messages, 10, 'test_trim_tool');
+    const hasToolCallMsg = result.kept.find(m => m.tool_calls);
+    if (hasToolCallMsg) {
+      const toolResp = result.kept.find(m => m.role === 'tool' && m.tool_call_id === 'tc_1');
+      assert.ok(toolResp, 'Tool response should be kept with its tool_call');
+    }
+  });
+
+  it('should ensure kept + trimmedForSummary equals original count', async () => {
+    const messages = Array.from({length: 14}, (_, i) => ({
+      role: i === 0 ? 'system' : (i % 2 === 0 ? 'user' : 'assistant'),
+      content: `msg ${i}`
+    }));
+    const result = await semanticTrim(messages, 10, 'test_trim_total');
+    assert.strictEqual(result.kept.length + result.trimmedForSummary.length, messages.length);
+  });
+});
+
+// ─── chunkedSummarize ─────────────────────────────────────
+describe('chunkedSummarize', () => {
+  it('should return null for empty messages', async () => {
+    const result = await chunkedSummarize([]);
+    assert.strictEqual(result, null);
+  });
+
+  it('should return null for null input', async () => {
+    const result = await chunkedSummarize(null);
+    assert.strictEqual(result, null);
+  });
+
+  it('should return object with summary, chunks, latencyMs on success', async () => {
+    const messages = [
+      { role: 'user', content: 'Help me write a sort function' },
+      { role: 'assistant', content: 'function sort(arr) { return arr.sort(); }' },
+    ];
+    const result = await chunkedSummarize(messages);
+    if (result) {
+      assert.ok('summary' in result);
+      assert.ok('chunks' in result);
+      assert.ok('latencyMs' in result);
+      assert.ok(typeof result.chunks === 'number');
+      assert.ok(result.chunks >= 1);
+    }
+  });
+
+  it('should create multiple chunks for large message sets', async () => {
+    const messages = Array.from({length: 20}, (_, i) => ({
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: 'x'.repeat(300),
+    }));
+    const result = await chunkedSummarize(messages);
+    if (result) {
+      assert.ok(result.chunks >= 2, `Expected >=2 chunks, got ${result.chunks}`);
+    }
+  });
+
+  it('should handle messages with non-string content', async () => {
+    const messages = [
+      { role: 'user', content: 'test' },
+      { role: 'assistant', content: null },
+      { role: 'tool', content: { result: 'data' } },
+    ];
+    const result = await chunkedSummarize(messages);
+    assert.ok(result === null || typeof result === 'object');
+  });
+});
+
+// ─── chunkedMergeSummary ──────────────────────────────────
+describe('chunkedMergeSummary', () => {
+  it('should return existing summary when newMessages is empty', async () => {
+    const existing = JSON.stringify({ topics: ['auth'], keyFacts: ['fact1'], codeRefs: [], decisions: [] });
+    const result = await chunkedMergeSummary(existing, []);
+    assert.strictEqual(result, existing);
+  });
+
+  it('should return existing summary when newMessages is null', async () => {
+    const existing = JSON.stringify({ topics: ['test'], keyFacts: [], codeRefs: [], decisions: [] });
+    const result = await chunkedMergeSummary(existing, null);
+    assert.strictEqual(result, existing);
+  });
+
+  it('should produce valid JSON output', async () => {
+    const existing = JSON.stringify({ topics: ['sort'], keyFacts: ['implemented quicksort'], codeRefs: ['utils/sort.js'], decisions: [] });
+    const newMsgs = [
+      { role: 'user', content: 'Add error handling to sort' },
+      { role: 'assistant', content: 'Added validation in sort.js' },
+    ];
+    const result = await chunkedMergeSummary(existing, newMsgs);
+    assert.doesNotThrow(() => JSON.parse(result));
   });
 });
