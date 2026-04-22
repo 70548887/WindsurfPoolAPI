@@ -3,6 +3,30 @@ import { config, log } from './config.js';
 import { getMemory, upsertMemory, saveRecentMessages, recordTrimStats as dbRecordTrimStats, saveAuditLog, getAuditLogs, markRolledBack as dbMarkRolledBack, saveEmbeddings } from './context-db.js';
 import { computeSalienceScores, isModelReady } from './context-embedder.js';
 
+// ── Token 估算 (支持中文) ──
+function estimateTokens(text) {
+  if (!text) return 0;
+  const cjkChars = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+  const nonCjk = text.length - cjkChars;
+  return Math.ceil(cjkChars / 1.2 + nonCjk / 3.5);
+}
+
+// ── 智能去重 ──
+function dedup(arr) {
+  if (!arr || !Array.isArray(arr)) return [];
+  const seen = new Set();
+  return arr.filter(item => {
+    if (!item) return false;
+    const normalized = item.toLowerCase().trim();
+    if (seen.has(normalized)) return false;
+    for (const existing of seen) {
+      if (existing.includes(normalized) || normalized.includes(existing)) return false;
+    }
+    seen.add(normalized);
+    return true;
+  });
+}
+
 // ── 动态导入 handleChatCompletions 避免循环依赖 ──
 let _handleChat = null;
 async function getHandleChatCompletions() {
@@ -83,7 +107,8 @@ function _legacyStructuralTrim(messages, targetCount) {
   }));
   
   // 不可裁剪: system 消息 + 最近 keepRecent 轮
-  const keepRecentCount = (config.contextTrimKeepRecent || 5) * 2; // 每轮 = user + assistant
+  const avgMsgsPerTurn = Math.ceil(messages.length / Math.max(1, messages.filter(m => m.role === 'user').length));
+  const keepRecentCount = (config.contextTrimKeepRecent || 5) * avgMsgsPerTurn;
   const mandatory = scored.filter(s =>
     s.msg.role === 'system' ||
     s.index >= messages.length - keepRecentCount
@@ -114,6 +139,8 @@ export { _legacyStructuralTrim as structuralTrim };
 export { semanticTrim as _testSemanticTrim };
 export { chunkedSummarize as _testChunkedSummarize };
 export { chunkedMergeSummary as _testChunkedMergeSummary };
+export { estimateTokens as _testEstimateTokens };
+export { dedup as _testDedup };
 
 // ── V2 语义评分 + 降级逻辑 ──
 async function scoredMessages(messages, convId) {
@@ -319,7 +346,7 @@ async function chunkedSummarize(messages) {
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
     const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || '');
-    const estimatedTokens = Math.ceil(content.length / 3.5);
+    const estimatedTokens = estimateTokens(content);
     
     // 不拆分规则：
     // - 同一轮 user+assistant 不拆分
@@ -412,10 +439,10 @@ async function chunkedMergeSummary(existingSummaryJson, newMessages) {
     const newParsed = JSON.parse(newResult.summary);
     
     const merged = {
-      topics: [...(existing.topics || []), ...(newParsed.topics || [])],
-      keyFacts: [...new Set([...(existing.keyFacts || existing.goals || []), ...(newParsed.keyFacts || [])])],
+      topics: dedup([...(existing.topics || []), ...(newParsed.topics || [])]),
+      keyFacts: dedup([...(existing.keyFacts || existing.goals || []), ...(newParsed.keyFacts || [])]),
       codeRefs: [...new Set([...(existing.codeRefs || existing.codeChanges || []), ...(newParsed.codeRefs || [])])],
-      decisions: [...new Set([...(existing.decisions || []), ...(newParsed.decisions || [])])],
+      decisions: dedup([...(existing.decisions || []), ...(newParsed.decisions || [])]),
     };
     
     return JSON.stringify(merged);
@@ -426,7 +453,7 @@ async function chunkedMergeSummary(existingSummaryJson, newMessages) {
 
 // ── 主入口 ──
 export async function processContext(messages, conversationId) {
-  const totalMsgs = messages.filter(m => m.role !== 'system').length;
+  const totalMsgs = messages.length;
   
   // Gate: 不需要修剪
   if (totalMsgs < (config.contextTrimThreshold || 12)) {
@@ -442,15 +469,16 @@ export async function processContext(messages, conversationId) {
   const useSemanticScoring = config.contextTrimSemanticEnabled !== false && isModelReady();
   let kept, trimmedForSummary;
   
+  const targetCount = Math.max(5, (config.contextTrimThreshold || 12) - 2);
   if (useSemanticScoring) {
     try {
-      ({ kept, trimmedForSummary } = await semanticTrim(messages, 10, conversationId));
+      ({ kept, trimmedForSummary } = await semanticTrim(messages, targetCount, conversationId));
     } catch (e) {
       console.error('[context-manager] semanticTrim failed, falling back to V1:', e.message);
-      ({ kept, trimmedForSummary } = _legacyStructuralTrim(messages, 10));
+      ({ kept, trimmedForSummary } = _legacyStructuralTrim(messages, targetCount));
     }
   } else {
-    ({ kept, trimmedForSummary } = _legacyStructuralTrim(messages, 10));
+    ({ kept, trimmedForSummary } = _legacyStructuralTrim(messages, targetCount));
   }
   
   // 3. 提取工作记忆 (D)
@@ -471,10 +499,6 @@ export async function processContext(messages, conversationId) {
           summaryText = await _legacyMergeSummary(longTermMemory.summary, trimmedForSummary);
           strategy = 'hybrid_merge';
         }
-      } else if (longTermMemory && longTermMemory.summary && trimmedForSummary.length === 0) {
-        // 直接复用缓存 (零延迟路径)
-        summaryText = longTermMemory.summary;
-        strategy = useSemanticScoring ? 'semantic_cached' : 'hybrid_cached';
       } else {
         // 完整生成
         if (useSemanticScoring) {
@@ -490,6 +514,10 @@ export async function processContext(messages, conversationId) {
       log.warn('Summary generation failed, falling back to structural trim:', err.message);
       strategy = 'structural_fallback';
     }
+  } else if (longTermMemory && longTermMemory.summary && trimmedForSummary.length === 0) {
+    // 直接复用缓存 (零延迟路径)
+    summaryText = longTermMemory.summary;
+    strategy = useSemanticScoring ? 'semantic_cached' : 'hybrid_cached';
   }
   
   // 审计记录
@@ -509,11 +537,11 @@ export async function processContext(messages, conversationId) {
     ...systemMsgs,
     ...(summaryText ? [{
       role: 'system',
-      content: `[Conversation Memory]\n${summaryText}`
+      content: `[Compressed History - earlier conversation turns]\n${summaryText}`
     }] : []),
     ...(workingMemory ? [{
       role: 'system',
-      content: `[Current Task Context]\n${workingMemory}`
+      content: `[Active Context - recent task state]\n${workingMemory}`
     }] : []),
     ...kept.filter(m => m.role !== 'system'),
   ];

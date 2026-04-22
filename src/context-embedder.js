@@ -8,6 +8,28 @@ let _pipeline = null;
 let _loadError = null;
 let _loading = false;  // 防止并发加载
 
+// 内存级 LRU 缓存（减少 DB 查询）
+const LRU_CACHE = new Map();
+const LRU_MAX = 500;
+
+function getCachedEmbedding(hash) {
+  if (LRU_CACHE.has(hash)) {
+    const entry = LRU_CACHE.get(hash);
+    LRU_CACHE.delete(hash);
+    LRU_CACHE.set(hash, entry); // 刷新 LRU 位置
+    return entry;
+  }
+  return null;
+}
+
+function setCachedEmbedding(hash, embedding) {
+  if (LRU_CACHE.size >= LRU_MAX) {
+    const oldest = LRU_CACHE.keys().next().value;
+    LRU_CACHE.delete(oldest);
+  }
+  LRU_CACHE.set(hash, embedding);
+}
+
 async function getEmbeddingPipeline() {
   if (_loadError) return null;
   if (_pipeline) return _pipeline;
@@ -119,17 +141,19 @@ export async function getEmbedding(text) {
 
 /**
  * 批量文本 -> Float32Array[]
- * 串行处理避免内存峰值
+ * 分批并行处理，每批 batchSize 条并发
  */
-export async function batchEmbed(texts) {
+export async function batchEmbed(texts, batchSize = 8) {
   const pipe = await getEmbeddingPipeline();
   if (!pipe) return null;
   
   const results = [];
-  for (const text of texts) {
-    const truncated = (text || '').slice(0, 900);
-    const output = await pipe(truncated, { pooling: 'mean', normalize: true });
-    results.push(new Float32Array(output.data));
+  for (let i = 0; i < texts.length; i += batchSize) {
+    const batch = texts.slice(i, i + batchSize);
+    const batchResults = await Promise.all(
+      batch.map(text => getEmbedding(text))
+    );
+    results.push(...batchResults);
   }
   return results;
 }
@@ -137,31 +161,46 @@ export async function batchEmbed(texts) {
 // ===== 语义显著性评分 =====
 
 /**
+ * 角色权重 — 细化不同角色的重要性
+ * system > user > tool_calls(assistant) > tool > assistant > 其他
+ */
+export function getRoleWeight(msg) {
+  if (msg.role === 'system') return 1.0;
+  if (msg.role === 'user') return 0.9;
+  if (msg.role === 'tool') return 0.8;
+  if (msg.tool_calls) return 0.85;
+  if (msg.role === 'assistant') return 0.6;
+  return 0.5;
+}
+
+/**
  * 核心函数: 替代 V1 的 scoreMessage()
  * 
  * 算法:
- *   salience = 0.6 * max(cosine_sim(msg_vec, query_vecs))   -- 语义相关性
- *            + 0.25 * (1 - sqrt(position / total))            -- 时间衰减
- *            + 0.15 * role_weight                             -- 角色权重
+ *   salience = 0.45 * max(cosine_sim(msg_vec, query_vecs))   -- 语义相关性
+ *            + 0.30 * (1 - position / total)                   -- 时间衰减（线性）
+ *            + 0.25 * role_weight                              -- 角色权重
  * 
- * role_weight: system=1.0, tool=0.7, user=0.5, assistant=0.3
+ * role_weight: system=1.0, user=0.9, tool_calls=0.85, tool=0.8, assistant=0.6
  * 
  * @param {Array} messages - 完整消息数组
  * @param {string} convId - 会话ID
  * @returns {Array<{index, score, message}>}
  */
 export async function computeSalienceScores(messages, convId) {
-  const ROLE_WEIGHTS = { system: 1.0, tool: 0.7, user: 0.5, assistant: 0.3 };
-  const ALPHA = 0.6;   // 语义相关性权重
-  const BETA = 0.25;   // 时间衰减权重  
-  const GAMMA = 0.15;  // 角色权重
+  const ALPHA = 0.45;  // 语义相关性（降低，避免过度依赖语义）
+  const BETA = 0.30;   // 时间衰减（提升，更重视近期消息）
+  const GAMMA = 0.25;  // 角色权重（提升，保护工具链和关键角色）
 
-  const keepRecent = (config.contextTrimKeepRecent || 5) * 2;
+  const avgMsgsPerTurn = Math.ceil(messages.length / Math.max(1, messages.filter(m => m.role === 'user').length));
+  const keepRecent = (config.contextTrimKeepRecent || 5) * avgMsgsPerTurn;
   const total = messages.length;
 
-  // 1. 提取最近 3 条 user 消息作为查询锚点
+  // 1. 动态确定查询锚点数量，提取最近 user 消息作为查询锚点
+  const userMsgCount = messages.filter(m => m.role === 'user').length;
+  const anchorCount = Math.max(1, Math.min(3, Math.ceil(userMsgCount / 3)));
   const recentUserMsgs = [];
-  for (let i = messages.length - 1; i >= 0 && recentUserMsgs.length < 3; i--) {
+  for (let i = messages.length - 1; i >= 0 && recentUserMsgs.length < anchorCount; i--) {
     if (messages[i].role === 'user' && messages[i].content) {
       recentUserMsgs.push(messages[i].content);
     }
@@ -171,7 +210,7 @@ export async function computeSalienceScores(messages, convId) {
     return messages.map((m, i) => ({
       index: i, message: m,
       score: i >= total - keepRecent || m.role === 'system' ? 999 : 
-        BETA * (1 - Math.sqrt(i / total)) + GAMMA * (ROLE_WEIGHTS[m.role] || 0.2)
+        BETA * (1 - (i / total)) + GAMMA * getRoleWeight(m)
     }));
   }
 
@@ -186,23 +225,45 @@ export async function computeSalienceScores(messages, convId) {
 
   const cachedEmbeddings = getEmbeddings(convId);
   
-  // 3. 找出未缓存的消息
-  const uncached = hashMap.filter(h => !cachedEmbeddings.has(h.hash) && h.text.length > 0);
+  // 3. 三级缓存查找：LRU内存 -> DB缓存 -> 计算
+  const needsCompute = [];
+  for (const h of hashMap) {
+    if (h.text.length === 0) continue;
+    
+    // Level 1: 内存 LRU 缓存
+    let embedding = getCachedEmbedding(h.hash);
+    if (embedding) {
+      cachedEmbeddings.set(h.hash, embedding);
+      continue;
+    }
+    
+    // Level 2: DB 缓存
+    const dbCached = cachedEmbeddings.get(h.hash);
+    if (dbCached) {
+      setCachedEmbedding(h.hash, dbCached);
+      continue;
+    }
+    
+    // Level 3: 需要计算
+    needsCompute.push({ hash: h.hash, text: h.text, role: h.role });
+  }
   
   // 4. 批量计算未缓存消息的 Embedding
-  if (uncached.length > 0) {
-    const embeddings = await batchEmbed(uncached.map(u => u.text));
+  if (needsCompute.length > 0) {
+    const embeddings = await batchEmbed(needsCompute.map(n => n.text));
     if (embeddings) {
-      const entries = uncached.map((u, i) => ({
-        contentHash: u.hash,
-        role: u.role,
+      const entries = needsCompute.map((n, i) => ({
+        contentHash: n.hash,
+        role: n.role,
         embedding: embeddings[i],
       }));
-      // 保存到缓存
+      // 保存到 DB 缓存 + LRU 缓存
       try {
         saveEmbeddings(convId, entries);
-        // 更新本地缓存 map
-        entries.forEach(e => cachedEmbeddings.set(e.contentHash, e.embedding));
+        entries.forEach(e => {
+          cachedEmbeddings.set(e.contentHash, e.embedding);
+          setCachedEmbedding(e.contentHash, e.embedding);
+        });
       } catch (e) {
         console.error('[context-embedder] Failed to save embeddings:', e.message);
       }
@@ -238,11 +299,11 @@ export async function computeSalienceScores(messages, convId) {
       }
     }
 
-    // 时间衰减
-    const recency = 1 - Math.sqrt(idx / total);
+    // 时间衰减（线性）
+    const recency = 1 - (idx / total);
 
     // 角色权重
-    const roleW = ROLE_WEIGHTS[h.message.role] || 0.2;
+    const roleW = getRoleWeight(h.message);
 
     const score = ALPHA * maxSim + BETA * recency + GAMMA * roleW;
 

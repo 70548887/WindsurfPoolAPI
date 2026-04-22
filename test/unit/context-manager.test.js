@@ -13,6 +13,8 @@ import {
   _testSemanticTrim as semanticTrim,
   _testChunkedSummarize as chunkedSummarize,
   _testChunkedMergeSummary as chunkedMergeSummary,
+  _testEstimateTokens,
+  _testDedup,
 } from '../../src/context-manager.js';
 import { config } from '../../src/config.js';
 import { closeDb, getRecentMessages, deleteMemory, saveAuditLog, getAuditLogs } from '../../src/context-db.js';
@@ -576,5 +578,64 @@ describe('chunkedMergeSummary', () => {
     ];
     const result = await chunkedMergeSummary(existing, newMsgs);
     assert.doesNotThrow(() => JSON.parse(result));
+  });
+});
+
+// ─── estimateTokens ──────────────────────────────────────────
+describe('estimateTokens', () => {
+  it('should estimate English text correctly', () => {
+    // "Hello world" = 11 chars / 3.5 ≈ 4 tokens
+    const result = _testEstimateTokens('Hello world');
+    assert.ok(result >= 3 && result <= 5, `Expected 3-5 tokens, got ${result}`);
+  });
+
+  it('should estimate Chinese text correctly', () => {
+    // "你好世界" = 4 CJK chars / 1.2 ≈ 4 tokens
+    const result = _testEstimateTokens('你好世界');
+    assert.ok(result >= 3 && result <= 5, `Expected 3-5 tokens, got ${result}`);
+  });
+
+  it('should handle mixed content', () => {
+    const result = _testEstimateTokens('Hello 你好 World 世界');
+    assert.ok(result > 0);
+    assert.ok(typeof result === 'number');
+  });
+
+  it('should return 0 for empty/null input', () => {
+    assert.strictEqual(_testEstimateTokens(''), 0);
+    assert.strictEqual(_testEstimateTokens(null), 0);
+    assert.strictEqual(_testEstimateTokens(undefined), 0);
+  });
+});
+
+// ─── dedup ───────────────────────────────────────────────────
+describe('dedup', () => {
+  it('should remove exact duplicates', () => {
+    const result = _testDedup(['auth', 'sort', 'auth']);
+    assert.deepStrictEqual(result, ['auth', 'sort']);
+  });
+
+  it('should remove case-insensitive duplicates', () => {
+    const result = _testDedup(['Auth', 'auth', 'AUTH']);
+    assert.strictEqual(result.length, 1);
+  });
+
+  it('should remove substring duplicates', () => {
+    const result = _testDedup(['error handling', 'added error handling']);
+    assert.strictEqual(result.length, 1);
+  });
+
+  it('should handle empty array', () => {
+    assert.deepStrictEqual(_testDedup([]), []);
+  });
+
+  it('should handle null/undefined items', () => {
+    const result = _testDedup(['valid', null, undefined, 'another']);
+    assert.ok(result.every(item => item !== null && item !== undefined));
+  });
+
+  it('should handle null/non-array input', () => {
+    assert.deepStrictEqual(_testDedup(null), []);
+    assert.deepStrictEqual(_testDedup(undefined), []);
   });
 });

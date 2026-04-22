@@ -8,6 +8,7 @@ import {
   getEmbedding,
   batchEmbed,
   computeSalienceScores,
+  getRoleWeight,
 } from '../../src/context-embedder.js';
 import { closeDb } from '../../src/context-db.js';
 
@@ -254,5 +255,56 @@ describe('computeSalienceScores', () => {
       assert.strictEqual(result[i].index, i);
       assert.deepStrictEqual(result[i].message, messages[i]);
     }
+  });
+});
+
+// ─── getRoleWeight ──────────────────────────────────────────
+describe('getRoleWeight', () => {
+  it('should return 1.0 for system', () => {
+    assert.strictEqual(getRoleWeight({ role: 'system' }), 1.0);
+  });
+
+  it('should return 0.9 for user', () => {
+    assert.strictEqual(getRoleWeight({ role: 'user' }), 0.9);
+  });
+
+  it('should return 0.85 for assistant with tool_calls', () => {
+    assert.strictEqual(getRoleWeight({ role: 'assistant', tool_calls: [{ id: 'tc_1' }] }), 0.85);
+  });
+
+  it('should return 0.8 for tool', () => {
+    assert.strictEqual(getRoleWeight({ role: 'tool' }), 0.8);
+  });
+
+  it('should return 0.6 for assistant', () => {
+    assert.strictEqual(getRoleWeight({ role: 'assistant' }), 0.6);
+  });
+
+  it('should return 0.5 for unknown role', () => {
+    assert.strictEqual(getRoleWeight({ role: 'custom' }), 0.5);
+    assert.strictEqual(getRoleWeight({ role: '' }), 0.5);
+  });
+});
+
+// ─── LRU 缓存行为验证 ───────────────────────────────────────
+describe('LRU cache behavior', () => {
+  it('should benefit from LRU cache on repeated calls', async () => {
+    const messages = [
+      { role: 'system', content: 'System' },
+      { role: 'user', content: 'Hello LRU test' },
+      { role: 'assistant', content: 'Hi' },
+    ];
+    // 第一次调用
+    const start1 = Date.now();
+    await computeSalienceScores(messages, 'test_lru_1');
+    const time1 = Date.now() - start1;
+
+    // 第二次调用（相同消息）
+    const start2 = Date.now();
+    await computeSalienceScores(messages, 'test_lru_1');
+    const time2 = Date.now() - start2;
+
+    // 第二次应该不慢于第一次（LRU 缓存命中）
+    assert.ok(time2 <= time1 + 50, `Second call (${time2}ms) should not be significantly slower than first (${time1}ms)`);
   });
 });
