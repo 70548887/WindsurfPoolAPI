@@ -81,6 +81,27 @@ export function getModelStatus() {
   return { status: 'idle', model: config.contextTrimEmbeddingModel || 'Xenova/all-MiniLM-L6-v2' };
 }
 
+/**
+ * 预加载 Embedding 模型（用于服务启动时调用）
+ * 失败时返回 false，不影响服务启动
+ */
+export async function preloadEmbeddingModel(timeoutMs = 60000) {
+  const startTime = Date.now();
+  try {
+    if (_pipeline || _loading) return isModelReady();
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Preload timeout')), timeoutMs)
+    );
+    await Promise.race([getEmbeddingPipeline(), timeoutPromise]);
+    const elapsedMs = Date.now() - startTime;
+    console.log(`[context-embedder] Preload completed in ${elapsedMs}ms, ready=${isModelReady()}`);
+    return isModelReady();
+  } catch (e) {
+    console.warn(`[context-embedder] Preload failed after ${Date.now() - startTime}ms:`, e.message);
+    return false;
+  }
+}
+
 // ===== Embedding 计算 =====
 
 /**

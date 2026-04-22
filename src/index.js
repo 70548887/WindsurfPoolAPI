@@ -3,6 +3,7 @@ import './dashboard/logger.js';
 import { initAuth, isAuthenticated } from './auth.js';
 import { startLanguageServer, waitForReady, isLanguageServerRunning, stopLanguageServer } from './langserver.js';
 import { startServer } from './server.js';
+import { preloadEmbeddingModel } from './context-embedder.js';
 import { config, log } from './config.js';
 import { existsSync, mkdirSync, rmSync, readdirSync } from 'fs';
 import { resolve as pathResolve } from 'path';
@@ -65,6 +66,14 @@ async function main() {
     log.warn('No accounts configured. Add via:');
     log.warn('  POST /auth/login {"token":"..."}');
     log.warn('  POST /auth/login {"api_key":"..."}');
+  }
+
+  // 预加载 Embedding 模型（V2 语义评分）
+  const embeddingReady = await preloadEmbeddingModel(60000);
+  if (embeddingReady) {
+    console.log('[index] Embedding model preloaded, V2 semantic scoring enabled');
+  } else {
+    console.warn('[index] Embedding preload failed, falling back to V1 scoring');
   }
 
   const server = startServer();
