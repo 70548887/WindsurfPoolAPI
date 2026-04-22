@@ -24,7 +24,9 @@ import { MODELS, MODEL_TIER_ACCESS as _TIER_TABLE, getTierModels as _getTierMode
 import { windsurfLogin, refreshFirebaseToken, reRegisterWithCodeium } from './windsurf-login.js';
 import { getModelAccessConfig, setModelAccessMode, setModelAccessList, addModelToList, removeModelFromList } from './model-access.js';
 import { checkMessageRateLimit } from '../windsurf-api.js';
-import { getContextMemoryOverview, getActiveConversations, getRecentTrimEvents, deleteMemory, getTrimStats } from '../context-db.js';
+import { getContextMemoryOverview, getActiveConversations, getRecentTrimEvents, deleteMemory, getTrimStats, getRecentAuditLogs } from '../context-db.js';
+import { rollbackTrim } from '../context-manager.js';
+import { getModelStatus } from '../context-embedder.js';
 
 function json(res, status, body) {
   const data = JSON.stringify(body);
@@ -599,6 +601,25 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
     return json(res, 200, { ok: true });
   }
 
+  // GET /context-memory/audit-logs — recent audit log entries
+  if (subpath === '/context-memory/audit-logs' && method === 'GET') {
+    const logs = getRecentAuditLogs(20);
+    return json(res, 200, { auditLogs: logs });
+  }
+
+  // POST /context-memory/rollback/:auditId — rollback a trim operation
+  if (subpath.startsWith('/context-memory/rollback/') && method === 'POST') {
+    const auditId = parseInt(subpath.split('/').pop());
+    if (isNaN(auditId)) return json(res, 400, { error: 'Invalid audit ID' });
+    const result = await rollbackTrim(auditId);
+    return json(res, 200, result);
+  }
+
+  // GET /context-memory/embedding-status — embedding model status
+  if (subpath === '/context-memory/embedding-status' && method === 'GET') {
+    return json(res, 200, getModelStatus());
+  }
+
   // PUT /settings/context-trim — update context management config
   if (subpath === '/settings/context-trim' && method === 'PUT') {
     try {
@@ -608,6 +629,10 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
       if (body.summaryEnabled !== undefined) updateConfig('CONTEXT_TRIM_SUMMARY_ENABLED', String(body.summaryEnabled));
       if (body.summaryModel !== undefined) updateConfig('CONTEXT_TRIM_SUMMARY_MODEL', body.summaryModel);
       if (body.memoryTtlHours !== undefined) updateConfig('CONTEXT_MEMORY_TTL_HOURS', String(body.memoryTtlHours));
+      if (body.semanticEnabled !== undefined) updateConfig('CONTEXT_TRIM_SEMANTIC_ENABLED', String(body.semanticEnabled));
+      if (body.embeddingModel !== undefined) updateConfig('CONTEXT_TRIM_EMBEDDING_MODEL', body.embeddingModel);
+      if (body.chunkSize !== undefined) updateConfig('CONTEXT_TRIM_CHUNK_SIZE', String(body.chunkSize));
+      if (body.auditEnabled !== undefined) updateConfig('CONTEXT_TRIM_AUDIT_ENABLED', String(body.auditEnabled));
       return json(res, 200, {
         success: true,
         config: {
@@ -617,6 +642,10 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
           contextTrimSummaryEnabled: config.contextTrimSummaryEnabled,
           contextTrimSummaryModel: config.contextTrimSummaryModel,
           contextMemoryTtlHours: config.contextMemoryTtlHours,
+          contextTrimSemanticEnabled: config.contextTrimSemanticEnabled,
+          contextTrimEmbeddingModel: config.contextTrimEmbeddingModel,
+          contextTrimChunkSize: config.contextTrimChunkSize,
+          contextTrimAuditEnabled: config.contextTrimAuditEnabled,
         }
       });
     } catch (err) {
@@ -633,6 +662,10 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
       contextTrimSummaryEnabled: config.contextTrimSummaryEnabled,
       contextTrimSummaryModel: config.contextTrimSummaryModel,
       contextMemoryTtlHours: config.contextMemoryTtlHours,
+      contextTrimSemanticEnabled: config.contextTrimSemanticEnabled,
+      contextTrimEmbeddingModel: config.contextTrimEmbeddingModel,
+      contextTrimChunkSize: config.contextTrimChunkSize,
+      contextTrimAuditEnabled: config.contextTrimAuditEnabled,
     });
   }
 

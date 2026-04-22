@@ -77,6 +77,12 @@ export const config = {
   contextTrimSummaryEnabled: (process.env.CONTEXT_TRIM_SUMMARY_ENABLED || 'true').toLowerCase() === 'true',
   contextTrimSummaryModel: process.env.CONTEXT_TRIM_SUMMARY_MODEL || 'gpt-4o-mini',
   contextMemoryTtlHours: parseInt(process.env.CONTEXT_MEMORY_TTL_HOURS || '24', 10),
+
+  // Context trimming V2 — semantic scoring & audit
+  contextTrimSemanticEnabled: process.env.CONTEXT_TRIM_SEMANTIC_ENABLED !== 'false',  // 默认 true
+  contextTrimEmbeddingModel: process.env.CONTEXT_TRIM_EMBEDDING_MODEL || 'Xenova/all-MiniLM-L6-v2',
+  contextTrimChunkSize: parseInt(process.env.CONTEXT_TRIM_CHUNK_SIZE) || 1500,
+  contextTrimAuditEnabled: process.env.CONTEXT_TRIM_AUDIT_ENABLED !== 'false',  // 默认 true
 };
 
 /**
@@ -93,15 +99,19 @@ export function updateConfig(envKey, value) {
         'CONTEXT_TRIM_KEEP_RECENT': 'contextTrimKeepRecent',
         'CONTEXT_TRIM_SUMMARY_ENABLED': 'contextTrimSummaryEnabled',
         'CONTEXT_TRIM_SUMMARY_MODEL': 'contextTrimSummaryModel',
-        'CONTEXT_MEMORY_TTL_HOURS': 'contextMemoryTtlHours'
+        'CONTEXT_MEMORY_TTL_HOURS': 'contextMemoryTtlHours',
+        'CONTEXT_TRIM_SEMANTIC_ENABLED': 'contextTrimSemanticEnabled',
+        'CONTEXT_TRIM_EMBEDDING_MODEL': 'contextTrimEmbeddingModel',
+        'CONTEXT_TRIM_CHUNK_SIZE': 'contextTrimChunkSize',
+        'CONTEXT_TRIM_AUDIT_ENABLED': 'contextTrimAuditEnabled'
     };
 
     const configKey = keyMap[envKey];
     if (!configKey) throw new Error('Unsupported config key: ' + envKey);
 
     // 1. 更新内存中的 config (with type coercion for non-string values)
-    const boolKeys = ['contextTrimEnabled', 'contextTrimSummaryEnabled'];
-    const intKeys = ['contextTrimThreshold', 'contextTrimKeepRecent', 'contextMemoryTtlHours'];
+    const boolKeys = ['contextTrimEnabled', 'contextTrimSummaryEnabled', 'contextTrimSemanticEnabled', 'contextTrimAuditEnabled'];
+    const intKeys = ['contextTrimThreshold', 'contextTrimKeepRecent', 'contextMemoryTtlHours', 'contextTrimChunkSize'];
     if (boolKeys.includes(configKey)) {
         config[configKey] = String(value).toLowerCase() === 'true';
     } else if (intKeys.includes(configKey)) {

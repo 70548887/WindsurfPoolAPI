@@ -51,6 +51,29 @@ db.exec(`
     summary_latency_ms INTEGER,
     created_at      INTEGER NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS message_embeddings (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL,
+    content_hash    TEXT NOT NULL,
+    role            TEXT NOT NULL,
+    embedding       BLOB NOT NULL,
+    created_at      INTEGER NOT NULL,
+    UNIQUE(conversation_id, content_hash)
+  );
+  CREATE INDEX IF NOT EXISTS idx_embed_conv ON message_embeddings(conversation_id);
+
+  CREATE TABLE IF NOT EXISTS trim_audit_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL,
+    original_hash   TEXT NOT NULL,
+    original_data   TEXT NOT NULL,
+    trimmed_count   INTEGER NOT NULL,
+    strategy        TEXT NOT NULL,
+    created_at      INTEGER NOT NULL,
+    rolled_back     INTEGER DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_audit_conv ON trim_audit_log(conversation_id, created_at);
 `);
 
 // 预编译 SQL 语句
@@ -85,9 +108,14 @@ const stmts = {
   getRecentTrimEvents: db.prepare('SELECT * FROM trim_stats ORDER BY created_at DESC LIMIT 20'),
   getActiveConversations: db.prepare('SELECT conversation_id, summary_version, covered_turns, model, updated_at FROM conversation_memory WHERE expires_at > ? ORDER BY updated_at DESC'),
   deleteMemory: db.prepare('DELETE FROM conversation_memory WHERE conversation_id = ?'),
+  deleteEmbeddings: db.prepare('DELETE FROM message_embeddings WHERE conversation_id = ?'),
+  deleteAuditLogs: db.prepare('DELETE FROM trim_audit_log WHERE conversation_id = ?'),
   cleanExpired: db.prepare('DELETE FROM conversation_memory WHERE expires_at < ?'),
   cleanOrphanMessages: db.prepare('DELETE FROM recent_messages WHERE conversation_id NOT IN (SELECT conversation_id FROM conversation_memory)'),
   cleanOldStats: db.prepare('DELETE FROM trim_stats WHERE created_at < ?'),
+  cleanOldEmbeddings: db.prepare('DELETE FROM message_embeddings WHERE created_at < ?'),
+  cleanOldAuditUnrolled: db.prepare('DELETE FROM trim_audit_log WHERE created_at < ? AND rolled_back = 0'),
+  cleanOldAuditAll: db.prepare('DELETE FROM trim_audit_log WHERE created_at < ?'),
   countActiveConversations: db.prepare('SELECT COUNT(*) as count FROM conversation_memory WHERE expires_at > ?'),
   totalTrimCount: db.prepare('SELECT COUNT(*) as count FROM trim_stats'),
 };
@@ -139,6 +167,8 @@ export function getActiveConversations() {
 export function deleteMemory(conversationId) {
   stmts.deleteMemory.run(conversationId);
   stmts.deleteRecentMessages.run(conversationId);
+  stmts.deleteEmbeddings.run(conversationId);
+  stmts.deleteAuditLogs.run(conversationId);
 }
 
 export function getContextMemoryOverview() {
@@ -152,6 +182,62 @@ export function getContextMemoryOverview() {
   };
 }
 
+// === Embedding 缓存函数 ===
+
+export function saveEmbeddings(conversationId, entries) {
+  const stmt = db.prepare(`INSERT OR REPLACE INTO message_embeddings
+    (conversation_id, content_hash, role, embedding, created_at)
+    VALUES (?, ?, ?, ?, ?)`);
+  const now = Date.now();
+  const tx = db.transaction(() => {
+    for (const e of entries) {
+      const buf = Buffer.from(e.embedding.buffer);
+      stmt.run(conversationId, e.contentHash, e.role, buf, now);
+    }
+  });
+  tx();
+}
+
+export function getEmbeddings(conversationId) {
+  const rows = db.prepare(`SELECT content_hash, embedding FROM message_embeddings
+    WHERE conversation_id = ?`).all(conversationId);
+  const map = new Map();
+  for (const row of rows) {
+    map.set(row.content_hash, new Float32Array(row.embedding.buffer.slice(
+      row.embedding.byteOffset, row.embedding.byteOffset + row.embedding.byteLength
+    )));
+  }
+  return map;
+}
+
+export function cleanEmbeddings(conversationId) {
+  db.prepare(`DELETE FROM message_embeddings WHERE conversation_id = ?`).run(conversationId);
+}
+
+// === 审计日志函数 ===
+
+export function saveAuditLog(conversationId, originalHash, originalData, trimmedCount, strategy) {
+  db.prepare(`INSERT INTO trim_audit_log
+    (conversation_id, original_hash, original_data, trimmed_count, strategy, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)`).run(
+    conversationId, originalHash, originalData, trimmedCount, strategy, Date.now()
+  );
+}
+
+export function getAuditLogs(conversationId) {
+  return db.prepare(`SELECT * FROM trim_audit_log WHERE conversation_id = ?
+    ORDER BY created_at DESC`).all(conversationId);
+}
+
+export function getRecentAuditLogs(limit = 20) {
+  return db.prepare(`SELECT * FROM trim_audit_log
+    ORDER BY created_at DESC LIMIT ?`).all(limit);
+}
+
+export function markRolledBack(auditId) {
+  db.prepare(`UPDATE trim_audit_log SET rolled_back = 1 WHERE id = ?`).run(auditId);
+}
+
 // 自动清理
 function cleanup() {
   try {
@@ -159,6 +245,12 @@ function cleanup() {
     stmts.cleanExpired.run(now);
     stmts.cleanOrphanMessages.run();
     stmts.cleanOldStats.run(now - 7 * 86400000);
+    // 清理7天前的 embedding 缓存
+    stmts.cleanOldEmbeddings.run(now - 7 * 24 * 3600 * 1000);
+    // 清理30天前的审计日志 (未回滚的)
+    stmts.cleanOldAuditUnrolled.run(now - 30 * 24 * 3600 * 1000);
+    // 清理90天前的所有审计日志
+    stmts.cleanOldAuditAll.run(now - 90 * 24 * 3600 * 1000);
     log.debug('Context memory cleanup completed');
   } catch (err) {
     log.warn('Context memory cleanup error:', err.message);

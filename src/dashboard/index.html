@@ -1507,6 +1507,37 @@ tbody tr:hover td { background: var(--surface-2); }
         </div>
       </div>
     </div>
+
+    <!-- Embedding Model Status -->
+    <div class="section" style="margin-top:24px">
+      <div class="section-header">
+        <div class="section-title">Embedding 模型状态</div>
+      </div>
+      <div class="section-body" id="embedding-status-card" style="padding:14px 18px;">
+        <span id="embed-status-dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;background:#9e9e9e;"></span>
+        <span id="embed-status-text">检查中...</span>
+        <span id="embed-model-name" style="margin-left:12px;color:var(--text-dim);"></span>
+      </div>
+    </div>
+
+    <!-- Audit Logs -->
+    <div class="section" style="margin-top:24px">
+      <div class="section-header">
+        <div class="section-title">裁剪审计日志</div>
+      </div>
+      <div class="section-body">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>时间</th><th>会话 ID</th><th>裁剪数</th><th>策略</th><th>状态</th><th>操作</th>
+            </tr></thead>
+            <tbody id="audit-log-body">
+              <tr class="empty-row"><td colspan="6">加载中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </section>
 
 <section class="panel" id="p-settings">
@@ -1615,6 +1646,34 @@ tbody tr:hover td { background: var(--surface-2); }
           <div style="margin-bottom:16px">
             <label style="display:block;margin-bottom:4px;color:var(--text-muted);font-size:13px">记忆有效期（小时）</label>
             <input type="number" id="ctx-memory-ttl-hours" class="input" min="1" value="24" style="width:120px">
+          </div>
+          <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+            <label class="switch">
+              <input type="checkbox" id="ctx-semantic-enabled">
+              <span class="switch-slider"></span>
+            </label>
+            <div>
+              <div style="font-weight:500">语义评分 (V2)</div>
+              <div class="text-sm text-muted">禁用时降级为 V1 规则评分</div>
+            </div>
+          </div>
+          <div style="margin-bottom:12px">
+            <label style="display:block;margin-bottom:4px;color:var(--text-muted);font-size:13px">Embedding 模型</label>
+            <input type="text" id="ctx-embedding-model" class="input" style="width:260px;" placeholder="Xenova/all-MiniLM-L6-v2">
+          </div>
+          <div style="margin-bottom:12px">
+            <label style="display:block;margin-bottom:4px;color:var(--text-muted);font-size:13px">分块摘要大小 (tokens)</label>
+            <input type="number" id="ctx-chunk-size" class="input" min="500" max="5000" step="100" style="width:120px">
+          </div>
+          <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+            <label class="switch">
+              <input type="checkbox" id="ctx-audit-enabled">
+              <span class="switch-slider"></span>
+            </label>
+            <div>
+              <div style="font-weight:500">审计日志</div>
+              <div class="text-sm text-muted">记录裁剪操作，支持回滚</div>
+            </div>
           </div>
           <button class="btn btn-primary" onclick="App.saveContextTrimSettings()">保存上下文配置</button>
           <span id="ctx-trim-msg" style="margin-left:12px;font-size:13px"></span>
@@ -2986,6 +3045,8 @@ const App = {
     `;
     this.loadContextConversations();
     this.loadContextTrimEvents(d.recentEvents);
+    this.loadEmbeddingStatus();
+    this.loadAuditLogs();
     this.poll('ctx-memory', () => this.loadContextMemoryStats(), 30000);
   },
 
@@ -3030,6 +3091,62 @@ const App = {
     }
   },
 
+  async loadEmbeddingStatus() {
+    try {
+      const res = await this.api('GET', '/context-memory/embedding-status');
+      const dot = document.getElementById('embed-status-dot');
+      const text = document.getElementById('embed-status-text');
+      const model = document.getElementById('embed-model-name');
+      const colors = { ready: '#4caf50', loading: '#ff9800', failed: '#f44336', idle: '#9e9e9e' };
+      const labels = { ready: '就绪', loading: '加载中...', failed: '加载失败(降级V1)', idle: '未初始化' };
+      dot.style.backgroundColor = colors[res.status] || '#9e9e9e';
+      text.textContent = labels[res.status] || res.status;
+      model.textContent = res.model || '';
+      if (res.error) model.textContent += ` (${res.error})`;
+    } catch (e) {
+      console.error('loadEmbeddingStatus error:', e);
+    }
+  },
+
+  async loadAuditLogs() {
+    try {
+      const res = await this.api('GET', '/context-memory/audit-logs');
+      const tbody = document.getElementById('audit-log-body');
+      const rows = res.auditLogs || [];
+      tbody.innerHTML = rows.length ? rows.map(log => {
+        const time = new Date(log.created_at).toLocaleString();
+        const status = log.rolled_back ? '<span style="color:var(--warn)">已回滚</span>' : '<span style="color:var(--success)">有效</span>';
+        const action = log.rolled_back ? '' : `<button class="btn btn-outline btn-xs" onclick="App.rollbackAudit(${log.id})">回滚</button>`;
+        return `<tr>
+          <td class="text-sm">${time}</td>
+          <td><code title="${this.esc(log.conversation_id || '')}">${this.esc((log.conversation_id || '').substring(0, 8))}…</code></td>
+          <td>${log.trimmed_count || 0}</td>
+          <td><span style="padding:2px 8px;background:var(--surface-2);border-radius:4px;font-size:12px">${this.esc(log.strategy || '-')}</span></td>
+          <td>${status}</td>
+          <td>${action}</td>
+        </tr>`;
+      }).join('') : '<tr class="empty-row"><td colspan="6">暂无审计日志</td></tr>';
+    } catch (e) {
+      console.error('loadAuditLogs error:', e);
+    }
+  },
+
+  async rollbackAudit(auditId) {
+    const ok = await this.confirm('回滚裁剪', '确认回滚此裁剪操作？', { danger: true });
+    if (!ok) return;
+    try {
+      const res = await this.api('POST', '/context-memory/rollback/' + auditId);
+      if (res.success) {
+        this.toast('回滚成功', 'success');
+        this.loadAuditLogs();
+      } else {
+        this.toast('回滚失败: ' + (res.reason || '未知错误'), 'error');
+      }
+    } catch (e) {
+      this.toast('回滚请求失败: ' + e.message, 'error');
+    }
+  },
+
   async loadContextTrimSettings() {
     try {
       const d = await this.api('GET', '/settings/context-trim');
@@ -3039,6 +3156,10 @@ const App = {
       document.getElementById('ctx-trim-summary-enabled').checked = !!d.contextTrimSummaryEnabled;
       document.getElementById('ctx-trim-summary-model').value = d.contextTrimSummaryModel || 'gpt-4o-mini';
       document.getElementById('ctx-memory-ttl-hours').value = d.contextMemoryTtlHours || 24;
+      document.getElementById('ctx-semantic-enabled').checked = d.contextTrimSemanticEnabled !== false;
+      document.getElementById('ctx-embedding-model').value = d.contextTrimEmbeddingModel || 'Xenova/all-MiniLM-L6-v2';
+      document.getElementById('ctx-chunk-size').value = d.contextTrimChunkSize || 1500;
+      document.getElementById('ctx-audit-enabled').checked = d.contextTrimAuditEnabled !== false;
     } catch(e) {
       console.error('加载上下文配置失败', e);
     }
@@ -3053,6 +3174,10 @@ const App = {
       summaryEnabled: document.getElementById('ctx-trim-summary-enabled').checked,
       summaryModel: document.getElementById('ctx-trim-summary-model').value,
       memoryTtlHours: parseInt(document.getElementById('ctx-memory-ttl-hours').value, 10),
+      semanticEnabled: document.getElementById('ctx-semantic-enabled').checked,
+      embeddingModel: document.getElementById('ctx-embedding-model').value,
+      chunkSize: parseInt(document.getElementById('ctx-chunk-size').value, 10),
+      auditEnabled: document.getElementById('ctx-audit-enabled').checked,
     };
     const r = await this.api('PUT', '/settings/context-trim', body);
     if (r.success) {

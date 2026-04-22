@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { config, log } from './config.js';
-import { getMemory, upsertMemory, saveRecentMessages, recordTrimStats as dbRecordTrimStats } from './context-db.js';
+import { getMemory, upsertMemory, saveRecentMessages, recordTrimStats as dbRecordTrimStats, saveAuditLog, getAuditLogs, markRolledBack as dbMarkRolledBack, saveEmbeddings } from './context-db.js';
+import { computeSalienceScores, isModelReady } from './context-embedder.js';
 
 // ── 动态导入 handleChatCompletions 避免循环依赖 ──
 let _handleChat = null;
@@ -35,8 +36,8 @@ export function buildToolCallGraph(messages) {
   return graph;
 }
 
-// ── 消息重要性评分 ──
-export function scoreMessage(msg, index, totalCount, toolCallGraph) {
+// ── V1 消息重要性评分 (保留为降级方案) ──
+function _legacyScoreMessage(msg, index, totalCount, toolCallGraph) {
   let score = 0;
   
   // 1. 角色基础权重
@@ -72,13 +73,13 @@ export function scoreMessage(msg, index, totalCount, toolCallGraph) {
   return score;
 }
 
-// ── 智能裁剪 (B) ──
-export function structuralTrim(messages, targetCount) {
+// ── V1 智能裁剪 (保留为降级方案) ──
+function _legacyStructuralTrim(messages, targetCount) {
   const toolCallGraph = buildToolCallGraph(messages);
   
   const scored = messages.map((msg, i) => ({
     msg, index: i,
-    score: scoreMessage(msg, i, messages.length, toolCallGraph),
+    score: _legacyScoreMessage(msg, i, messages.length, toolCallGraph),
   }));
   
   // 不可裁剪: system 消息 + 最近 keepRecent 轮
@@ -102,6 +103,81 @@ export function structuralTrim(messages, targetCount) {
   return {
     kept: result.map(s => s.msg),
     trimmedForSummary: trimmed.sort((a, b) => a.index - b.index).map(s => s.msg),
+  };
+}
+
+// 保持测试兼容的别名导出
+export { _legacyScoreMessage as scoreMessage };
+export { _legacyStructuralTrim as structuralTrim };
+
+// ── V2 语义评分 + 降级逻辑 ──
+async function scoredMessages(messages, convId) {
+  if (config.contextTrimSemanticEnabled !== false && isModelReady()) {
+    try {
+      return await computeSalienceScores(messages, convId);
+    } catch (e) {
+      console.error('[context-manager] Semantic scoring failed, falling back to V1:', e.message);
+    }
+  }
+  // 降级到 V1 规则评分
+  const graph = buildToolCallGraph(messages);
+  return messages.map((m, i) => ({
+    index: i, message: m,
+    score: _legacyScoreMessage(m, i, messages.length, graph)
+  }));
+}
+
+/**
+ * V2 语义裁剪 — 替代 structuralTrim
+ * 使用语义评分而非规则评分，但保留工具链完整性
+ */
+async function semanticTrim(messages, targetCount, convId) {
+  const scored = await scoredMessages(messages, convId);
+  
+  // 分为不可裁和可裁
+  const mandatory = [];
+  const candidates = [];
+  
+  for (const item of scored) {
+    if (item.score >= 999) {
+      mandatory.push(item);
+    } else {
+      candidates.push(item);
+    }
+  }
+  
+  // 按分数降序排列
+  candidates.sort((a, b) => b.score - a.score);
+  
+  // 计算需要保留的候选数
+  const needFromCandidates = targetCount - mandatory.length;
+  const kept = needFromCandidates > 0 ? candidates.slice(0, needFromCandidates) : [];
+  const trimmed = needFromCandidates > 0 ? candidates.slice(needFromCandidates) : candidates;
+  
+  // 工具链完整性：如果保留了 assistant 的 tool_calls，也要保留对应的 tool 响应
+  const toolCallGraph = buildToolCallGraph(messages);
+  const keptIndices = new Set([...mandatory.map(m => m.index), ...kept.map(m => m.index)]);
+  
+  for (const item of [...mandatory, ...kept]) {
+    const msg = item.message;
+    if (msg.tool_calls) {
+      for (const tc of msg.tool_calls) {
+        const toolIdx = messages.findIndex((m, i) => m.role === 'tool' && m.tool_call_id === tc.id);
+        if (toolIdx >= 0 && !keptIndices.has(toolIdx)) {
+          keptIndices.add(toolIdx);
+          kept.push({ index: toolIdx, score: 0, message: messages[toolIdx] });
+        }
+      }
+    }
+  }
+  
+  // 按原始顺序重组
+  const allKept = [...mandatory, ...kept].sort((a, b) => a.index - b.index);
+  const allTrimmed = scored.filter(s => !keptIndices.has(s.index)).sort((a, b) => a.index - b.index);
+  
+  return {
+    kept: allKept.map(s => s.message),
+    trimmedForSummary: allTrimmed.map(s => s.message),
   };
 }
 
@@ -131,7 +207,7 @@ export function extractWorkingMemory(recentMessages) {
   return parts.length ? parts.join('\n') : null;
 }
 
-// ── 摘要生成 (C) ──
+// ── 摘要生成辅助函数 ──
 function formatMessagesCompact(messages) {
   return messages.map(m => {
     const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '');
@@ -165,12 +241,10 @@ async function callLightweightModel(prompt) {
 
 export function validateAndCleanSummary(rawText) {
   if (!rawText) return null;
-  // 尝试直接解析
   try {
     JSON.parse(rawText);
     return rawText;
   } catch {}
-  // 尝试提取 JSON 块（LLM 可能包裹在 ```json ... ``` 中）
   const jsonMatch = rawText.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     try {
@@ -178,11 +252,11 @@ export function validateAndCleanSummary(rawText) {
       return jsonMatch[0];
     } catch {}
   }
-  // 无法提取有效 JSON，作为纯文本摘要返回
   return rawText;
 }
 
-async function generateFullSummary(messages) {
+// ── V1 摘要生成 (保留为降级方案) ──
+async function _legacyGenerateFullSummary(messages) {
   if (!config.contextTrimSummaryEnabled || messages.length === 0) return null;
   
   const prompt = `你是一个对话摘要助手。请将以下对话历史压缩为结构化摘要。
@@ -204,7 +278,8 @@ ${formatMessagesCompact(messages)}
   const raw = await callLightweightModel(prompt); return validateAndCleanSummary(raw);
 }
 
-async function mergeSummary(existingSummaryJson, newMessages) {
+// ── V1 增量合并 (保留为降级方案) ──
+async function _legacyMergeSummary(existingSummaryJson, newMessages) {
   if (!config.contextTrimSummaryEnabled || newMessages.length === 0) return existingSummaryJson;
   
   const prompt = `你是一个对话摘要助手。下面是已有的对话摘要和新增的对话内容。
@@ -227,6 +302,123 @@ ${formatMessagesCompact(newMessages)}
   const raw = await callLightweightModel(prompt); return validateAndCleanSummary(raw);
 }
 
+// ── V2 分块独立摘要 ──
+async function chunkedSummarize(messages) {
+  if (!messages || messages.length === 0) return null;
+  
+  const chunkSize = config.contextTrimChunkSize || 1500;
+  const chunks = [];
+  let currentChunk = [];
+  let currentTokens = 0;
+  
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || '');
+    const estimatedTokens = Math.ceil(content.length / 3.5);
+    
+    // 不拆分规则：
+    // - 同一轮 user+assistant 不拆分
+    // - tool_call 和对应 tool response 不拆分
+    const isToolResponse = msg.role === 'tool';
+    const prevIsToolCall = i > 0 && messages[i-1].tool_calls;
+    const shouldStayWithPrev = isToolResponse && prevIsToolCall;
+    
+    if (currentTokens + estimatedTokens > chunkSize && currentChunk.length > 0 && !shouldStayWithPrev) {
+      chunks.push(currentChunk);
+      currentChunk = [];
+      currentTokens = 0;
+    }
+    
+    currentChunk.push(msg);
+    currentTokens += estimatedTokens;
+  }
+  
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk);
+  }
+  
+  // 并行对每块生成摘要
+  const startTime = Date.now();
+  const chunkPromises = chunks.map(async (chunk, idx) => {
+    const chunkText = chunk.map(m => {
+      const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '');
+      return `[${m.role}]: ${content}`;
+    }).join('\n');
+    
+    const prompt = `Summarize this conversation chunk concisely. Preserve: file paths, function names, specific error messages, decisions and their reasons. Output JSON:
+{"topic": "brief topic", "keyFacts": ["fact1", "fact2"], "codeRefs": ["file:change"], "decisions": ["decision1"]}
+
+Conversation chunk ${idx + 1}/${chunks.length}:
+${chunkText}`;
+    
+    try {
+      const result = await callLightweightModel(prompt);
+      return validateAndCleanSummary(result);
+    } catch (e) {
+      return JSON.stringify({ topic: `chunk ${idx + 1}`, keyFacts: ['summarization failed'], codeRefs: [], decisions: [] });
+    }
+  });
+  
+  const chunkSummaries = await Promise.all(chunkPromises);
+  
+  // 合并所有块摘要
+  const merged = { topics: [], keyFacts: [], codeRefs: [], decisions: [] };
+  
+  for (const raw of chunkSummaries) {
+    if (!raw) continue;
+    try {
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (parsed.topic) merged.topics.push(parsed.topic);
+      if (parsed.keyFacts) merged.keyFacts.push(...parsed.keyFacts);
+      if (parsed.codeRefs) merged.codeRefs.push(...parsed.codeRefs);
+      if (parsed.decisions) merged.decisions.push(...parsed.decisions);
+      // 兼容 V1 格式
+      if (parsed.goals) merged.keyFacts.push(...(Array.isArray(parsed.goals) ? parsed.goals : [parsed.goals]));
+      if (parsed.codeChanges) merged.codeRefs.push(...(Array.isArray(parsed.codeChanges) ? parsed.codeChanges : [parsed.codeChanges]));
+    } catch (e) {
+      merged.keyFacts.push(raw);
+    }
+  }
+  
+  // 去重
+  merged.keyFacts = [...new Set(merged.keyFacts)];
+  merged.codeRefs = [...new Set(merged.codeRefs)];
+  merged.decisions = [...new Set(merged.decisions)];
+  
+  const latencyMs = Date.now() - startTime;
+  const summary = JSON.stringify(merged);
+  
+  return { summary, chunks: chunks.length, latencyMs };
+}
+
+/**
+ * V2 增量合并 — 仅对新增 delta 消息分块摘要，与已有摘要合并
+ */
+async function chunkedMergeSummary(existingSummaryJson, newMessages) {
+  if (!newMessages || newMessages.length === 0) return existingSummaryJson;
+  
+  // 对新消息做分块摘要
+  const newResult = await chunkedSummarize(newMessages);
+  if (!newResult || !newResult.summary) return existingSummaryJson;
+  
+  // 合并已有摘要和新摘要
+  try {
+    const existing = JSON.parse(existingSummaryJson);
+    const newParsed = JSON.parse(newResult.summary);
+    
+    const merged = {
+      topics: [...(existing.topics || []), ...(newParsed.topics || [])],
+      keyFacts: [...new Set([...(existing.keyFacts || existing.goals || []), ...(newParsed.keyFacts || [])])],
+      codeRefs: [...new Set([...(existing.codeRefs || existing.codeChanges || []), ...(newParsed.codeRefs || [])])],
+      decisions: [...new Set([...(existing.decisions || []), ...(newParsed.decisions || [])])],
+    };
+    
+    return JSON.stringify(merged);
+  } catch (e) {
+    return newResult.summary;
+  }
+}
+
 // ── 主入口 ──
 export async function processContext(messages, conversationId) {
   const totalMsgs = messages.filter(m => m.role !== 'system').length;
@@ -241,34 +433,68 @@ export async function processContext(messages, conversationId) {
   // 1. 从 SQLite 加载长期记忆
   const longTermMemory = getMemory(conversationId);
   
-  // 2. 规则压缩 (B)
-  const { kept, trimmedForSummary } = structuralTrim(messages, 10);
+  // 2. V2 语义裁剪 (降级到 V1 规则裁剪)
+  const useSemanticScoring = config.contextTrimSemanticEnabled !== false && isModelReady();
+  let kept, trimmedForSummary;
+  
+  if (useSemanticScoring) {
+    try {
+      ({ kept, trimmedForSummary } = await semanticTrim(messages, 10, conversationId));
+    } catch (e) {
+      console.error('[context-manager] semanticTrim failed, falling back to V1:', e.message);
+      ({ kept, trimmedForSummary } = _legacyStructuralTrim(messages, 10));
+    }
+  } else {
+    ({ kept, trimmedForSummary } = _legacyStructuralTrim(messages, 10));
+  }
   
   // 3. 提取工作记忆 (D)
   const workingMemory = extractWorkingMemory(kept);
   
-  // 4. 摘要处理 (C 混合模式)
+  // 4. 摘要处理 (V2 分块模式 / V1 降级)
   let summaryText = null;
-  let strategy = 'structural';
+  let strategy = useSemanticScoring ? 'semantic' : 'structural';
   
   if (config.contextTrimSummaryEnabled && trimmedForSummary.length > 0) {
     try {
       if (longTermMemory && longTermMemory.summary && trimmedForSummary.length <= 2) {
         // 增量合并 (快速路径)
-        summaryText = await mergeSummary(longTermMemory.summary, trimmedForSummary);
-        strategy = 'hybrid_merge';
+        if (useSemanticScoring) {
+          summaryText = await chunkedMergeSummary(longTermMemory.summary, trimmedForSummary);
+          strategy = 'semantic_merge';
+        } else {
+          summaryText = await _legacyMergeSummary(longTermMemory.summary, trimmedForSummary);
+          strategy = 'hybrid_merge';
+        }
       } else if (longTermMemory && longTermMemory.summary && trimmedForSummary.length === 0) {
         // 直接复用缓存 (零延迟路径)
         summaryText = longTermMemory.summary;
-        strategy = 'hybrid_cached';
+        strategy = useSemanticScoring ? 'semantic_cached' : 'hybrid_cached';
       } else {
         // 完整生成
-        summaryText = await generateFullSummary(trimmedForSummary);
-        strategy = 'hybrid_full';
+        if (useSemanticScoring) {
+          const result = await chunkedSummarize(trimmedForSummary);
+          summaryText = result ? result.summary : null;
+          strategy = 'semantic_chunked';
+        } else {
+          summaryText = await _legacyGenerateFullSummary(trimmedForSummary);
+          strategy = 'hybrid_full';
+        }
       }
     } catch (err) {
       log.warn('Summary generation failed, falling back to structural trim:', err.message);
       strategy = 'structural_fallback';
+    }
+  }
+  
+  // 审计记录
+  if (config.contextTrimAuditEnabled !== false && trimmedForSummary.length > 0) {
+    try {
+      const auditData = JSON.stringify(trimmedForSummary);
+      const auditHash = createHash('sha256').update(auditData).digest('hex');
+      saveAuditLog(conversationId, auditHash, auditData, trimmedForSummary.length, strategy);
+    } catch (e) {
+      console.error('[context-manager] Failed to save audit log:', e.message);
     }
   }
   
@@ -299,6 +525,16 @@ export async function processContext(messages, conversationId) {
   return { messages: assembled, trimmed: true, strategy };
 }
 
+// ── 回滚裁剪操作 ──
+export async function rollbackTrim(auditId) {
+  try {
+    dbMarkRolledBack(auditId);
+    return { success: true, auditId };
+  } catch (e) {
+    return { success: false, reason: e.message };
+  }
+}
+
 // ── 响应后异步更新摘要 ──
 export async function postResponseHook(conversationId, originalMessages, assistantText) {
   try {
@@ -317,6 +553,20 @@ export async function postResponseHook(conversationId, originalMessages, assista
     
     saveRecentMessages(conversationId, recentMsgs);
     
+    // V2: 预热向量缓存 — 对新的 assistant 回复计算 Embedding
+    if (config.contextTrimSemanticEnabled !== false && isModelReady()) {
+      try {
+        const { getEmbedding, contentHash: computeHash } = await import('./context-embedder.js');
+        const hash = computeHash('assistant', assistantText);
+        const vec = await getEmbedding(assistantText);
+        if (vec) {
+          saveEmbeddings(conversationId, [{ contentHash: hash, role: 'assistant', embedding: vec }]);
+        }
+      } catch (e) {
+        // 预热失败不影响主流程
+      }
+    }
+    
     // 检查是否需要更新长期记忆
     const existing = getMemory(conversationId);
     const totalTurns = Math.floor(originalMessages.filter(m => m.role === 'user').length);
@@ -324,15 +574,25 @@ export async function postResponseHook(conversationId, originalMessages, assista
     if (!existing || totalTurns - (existing.covered_turns || 0) >= 2) {
       // 需要更新摘要
       const nonSystemMsgs = originalMessages.filter(m => m.role !== 'system');
+      const useSemanticScoring = config.contextTrimSemanticEnabled !== false && isModelReady();
       
       let newSummary;
       if (existing && existing.summary) {
         // 增量更新
         const uncoveredMsgs = nonSystemMsgs.slice(existing.covered_turns * 2);
-        newSummary = await mergeSummary(existing.summary, uncoveredMsgs);
+        if (useSemanticScoring) {
+          newSummary = await chunkedMergeSummary(existing.summary, uncoveredMsgs);
+        } else {
+          newSummary = await _legacyMergeSummary(existing.summary, uncoveredMsgs);
+        }
       } else {
         // 首次生成
-        newSummary = await generateFullSummary(nonSystemMsgs);
+        if (useSemanticScoring) {
+          const result = await chunkedSummarize(nonSystemMsgs);
+          newSummary = result ? result.summary : null;
+        } else {
+          newSummary = await _legacyGenerateFullSummary(nonSystemMsgs);
+        }
       }
       
       if (newSummary) {

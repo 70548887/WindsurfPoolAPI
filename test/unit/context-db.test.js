@@ -11,6 +11,13 @@ import {
   deleteMemory,
   getActiveConversations,
   getContextMemoryOverview,
+  saveEmbeddings,
+  getEmbeddings,
+  cleanEmbeddings,
+  saveAuditLog,
+  getAuditLogs,
+  getRecentAuditLogs,
+  markRolledBack,
   closeDb,
 } from '../../src/context-db.js';
 
@@ -160,5 +167,100 @@ describe('getContextMemoryOverview', () => {
     assert.ok(typeof overview.totalTrimCount === 'number');
     assert.ok(overview.totalTrimCount >= 1, 'should have at least 1 trim count');
     assert.ok(Array.isArray(overview.byStrategy));
+  });
+});
+
+
+// ─── saveEmbeddings + getEmbeddings ─────────────────────────
+describe('saveEmbeddings and getEmbeddings', () => {
+  it('should save and retrieve embeddings', () => {
+    const id = uniqueId('embed');
+    upsertMemory(id, 'dummy', 0, 'model');
+    const entries = [
+      { contentHash: 'hash_embed_1', role: 'user', embedding: new Float32Array([1.0, 2.0, 3.0]) },
+      { contentHash: 'hash_embed_2', role: 'assistant', embedding: new Float32Array([4.0, 5.0, 6.0]) },
+    ];
+    saveEmbeddings(id, entries);
+
+    const result = getEmbeddings(id);
+    assert.strictEqual(result.size, 2);
+    assert.ok(result.has('hash_embed_1'));
+
+    const vec = result.get('hash_embed_1');
+    assert.ok(vec instanceof Float32Array);
+    assert.strictEqual(vec.length, 3);
+    assert.ok(Math.abs(vec[0] - 1.0) < 0.001);
+  });
+
+  it('should handle UPSERT on duplicate contentHash', () => {
+    const id = uniqueId('embed_dup');
+    upsertMemory(id, 'dummy', 0, 'model');
+    const entries1 = [{ contentHash: 'hash_dup', role: 'user', embedding: new Float32Array([1.0, 2.0]) }];
+    const entries2 = [{ contentHash: 'hash_dup', role: 'user', embedding: new Float32Array([3.0, 4.0]) }];
+    saveEmbeddings(id, entries1);
+    saveEmbeddings(id, entries2);
+
+    const result = getEmbeddings(id);
+    assert.strictEqual(result.size, 1);
+    const vec = result.get('hash_dup');
+    assert.ok(Math.abs(vec[0] - 3.0) < 0.001);
+  });
+
+  it('should clean embeddings for conversation', () => {
+    const id = uniqueId('embed_clean');
+    upsertMemory(id, 'dummy', 0, 'model');
+    saveEmbeddings(id, [{ contentHash: 'h1', role: 'user', embedding: new Float32Array([1]) }]);
+    cleanEmbeddings(id);
+    const result = getEmbeddings(id);
+    assert.strictEqual(result.size, 0);
+  });
+
+  it('should return empty map for unknown conversation', () => {
+    const result = getEmbeddings('nonexistent_embed_conv_xyz');
+    assert.strictEqual(result.size, 0);
+  });
+});
+
+// ─── saveAuditLog + getAuditLogs ─────────────────────────
+describe('saveAuditLog and getAuditLogs', () => {
+  it('should save and retrieve audit logs', () => {
+    const id = uniqueId('audit');
+    upsertMemory(id, 'dummy', 0, 'model');
+    saveAuditLog(id, 'hash123', '{"data":"test"}', 5, 'semantic_chunked');
+    const logs = getAuditLogs(id);
+    assert.ok(logs.length > 0);
+    assert.strictEqual(logs[0].conversation_id, id);
+    assert.strictEqual(logs[0].trimmed_count, 5);
+    assert.strictEqual(logs[0].strategy, 'semantic_chunked');
+    assert.strictEqual(logs[0].rolled_back, 0);
+  });
+
+  it('should get recent audit logs', () => {
+    const logs = getRecentAuditLogs(5);
+    assert.ok(Array.isArray(logs));
+  });
+
+  it('should mark audit as rolled back', () => {
+    const id = uniqueId('audit_rb');
+    upsertMemory(id, 'dummy', 0, 'model');
+    saveAuditLog(id, 'hash456', '{}', 3, 'test');
+    const logs = getAuditLogs(id);
+    const auditId = logs[0].id;
+    markRolledBack(auditId);
+    const updated = getAuditLogs(id);
+    assert.strictEqual(updated[0].rolled_back, 1);
+  });
+
+  it('should return empty array for unknown conversation', () => {
+    const logs = getAuditLogs('nonexistent_audit_conv_xyz');
+    assert.ok(Array.isArray(logs));
+    assert.strictEqual(logs.length, 0);
+  });
+});
+
+// ─── closeDb 放在最后测试 ─────────────────────────────────
+describe('closeDb', () => {
+  it('closeDb should close without error', () => {
+    assert.doesNotThrow(() => closeDb());
   });
 });

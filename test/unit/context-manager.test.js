@@ -8,8 +8,11 @@ import {
   extractWorkingMemory,
   buildToolCallGraph,
   processContext,
+  postResponseHook,
+  rollbackTrim,
 } from '../../src/context-manager.js';
-import { closeDb } from '../../src/context-db.js';
+import { config } from '../../src/config.js';
+import { closeDb, getRecentMessages, deleteMemory, saveAuditLog, getAuditLogs } from '../../src/context-db.js';
 
 after(() => {
   closeDb();
@@ -141,7 +144,6 @@ describe('structuralTrim', () => {
       })),
     ];
     const { kept } = structuralTrim(msgs, 5);
-    // 最后几条消息应该在 kept 中
     const lastMsg = msgs[msgs.length - 1];
     assert.ok(kept.includes(lastMsg), 'last message should be in kept');
   });
@@ -201,6 +203,70 @@ describe('extractWorkingMemory', () => {
   });
 });
 
+// ─── buildToolCallGraph ──────────────────────────────────
+describe('buildToolCallGraph', () => {
+  it('should map tool_call_ids referenced by tool messages', () => {
+    const messages = [
+      { role: 'assistant', tool_calls: [{ id: 'tc_1', name: 'search' }] },
+      { role: 'tool', tool_call_id: 'tc_1', content: 'result' },
+      { role: 'assistant', tool_calls: [{ id: 'tc_2', name: 'read' }] },
+    ];
+    const graph = buildToolCallGraph(messages);
+    assert.strictEqual(graph.has('tc_1'), true);
+    assert.strictEqual(graph.has('tc_2'), false);
+  });
+
+  it('should return empty map for messages without tools', () => {
+    const messages = [
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'hi' },
+    ];
+    const graph = buildToolCallGraph(messages);
+    assert.strictEqual(graph.size, 0);
+  });
+
+  it('should handle empty messages', () => {
+    const graph = buildToolCallGraph([]);
+    assert.strictEqual(graph.size, 0);
+  });
+});
+
+// ─── postResponseHook ─────────────────────────────────────
+describe('postResponseHook', () => {
+  it('should not throw when summary is disabled', async () => {
+    const origEnabled = config.contextTrimSummaryEnabled;
+    config.contextTrimSummaryEnabled = false;
+
+    await assert.doesNotReject(async () => {
+      await postResponseHook('test_conv_hook', [
+        { role: 'user', content: 'test' },
+        { role: 'assistant', content: 'response' }
+      ], 'response text');
+    });
+
+    config.contextTrimSummaryEnabled = origEnabled;
+  });
+
+  it('should save recent messages to SQLite when summary enabled', async () => {
+    const origEnabled = config.contextTrimSummaryEnabled;
+    config.contextTrimSummaryEnabled = true;  // 启用以触发 saveRecentMessages（LLM调用会安全失败）
+
+    const convId = 'test_hook_save';
+    const messages = [
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'hi there' },
+    ];
+
+    await postResponseHook(convId, messages, 'hi there');
+
+    const saved = getRecentMessages(convId);
+    assert.ok(saved.length > 0, 'Should have saved recent messages');
+
+    deleteMemory(convId);
+    config.contextTrimSummaryEnabled = origEnabled;
+  });
+});
+
 // ─── processContext ───────────────────────────────────────
 describe('processContext', () => {
   it('短对话不触发修剪，trimmed=false', async () => {
@@ -221,7 +287,6 @@ describe('processContext', () => {
     const msgs = [
       { role: 'system', content: 'You are a helpful assistant' },
     ];
-    // 添加 >= 12 条非 system 消息
     for (let i = 0; i < 20; i++) {
       msgs.push({ role: 'user', content: `User message ${i}: please help me with task number ${i}` });
       msgs.push({ role: 'assistant', content: `Assistant response ${i}: sure, I can help with that task` });
@@ -230,10 +295,112 @@ describe('processContext', () => {
     assert.strictEqual(result.trimmed, true);
     assert.ok(result.messages.length < msgs.length, 
       `Expected trimmed (${result.messages.length}) < original (${msgs.length})`);
-    // 验证降级行为 — strategy 应该是 structural 相关的
     assert.ok(
-      ['structural', 'structural_fallback', 'hybrid_full', 'hybrid_merge', 'hybrid_cached'].includes(result.strategy),
+      ['structural', 'structural_fallback', 'hybrid_full', 'hybrid_merge', 'hybrid_cached', 'semantic', 'semantic_chunked', 'semantic_merge', 'semantic_cached'].includes(result.strategy),
       `Unexpected strategy: ${result.strategy}`
     );
+  });
+});
+
+// ─── rollbackTrim ─────────────────────────────────────────
+describe('rollbackTrim', () => {
+  it('should return success for valid audit id', async () => {
+    const convId = 'rollback_cm_test_' + Date.now();
+    saveAuditLog(convId, 'hash789', '[{"role":"user","content":"test"}]', 1, 'test');
+    const logs = getAuditLogs(convId);
+    assert.ok(logs.length > 0, 'should have audit log');
+    const result = await rollbackTrim(logs[0].id);
+    assert.ok(result.success);
+    assert.strictEqual(result.auditId, logs[0].id);
+    deleteMemory(convId);
+  });
+
+  it('should return success even for nonexistent id (no-op)', async () => {
+    const result = await rollbackTrim(999999);
+    assert.ok(result.success);
+  });
+});
+
+// ─── processContext V2 strategies ─────────────────────────
+describe('processContext V2 strategies', () => {
+  it('should include strategy field in result', async () => {
+    const msgs = [
+      { role: 'system', content: 'You are a helper' },
+      { role: 'user', content: 'Hello' },
+      { role: 'assistant', content: 'Hi' },
+    ];
+    const result = await processContext(msgs, 'test_strategy_field');
+    assert.ok(typeof result.strategy === 'string');
+    assert.ok(result.strategy.length > 0);
+  });
+
+  it('should preserve system messages after trimming', async () => {
+    const msgs = [
+      { role: 'system', content: 'You are a helpful assistant' },
+    ];
+    for (let i = 0; i < 20; i++) {
+      msgs.push({ role: 'user', content: 'User message ' + i + ': help me with task ' + i });
+      msgs.push({ role: 'assistant', content: 'Assistant response ' + i + ': sure, I can help' });
+    }
+    const convId = 'test_preserve_system_' + Date.now();
+    const result = await processContext(msgs, convId);
+    const systemMsgs = result.messages.filter(m => m.role === 'system');
+    assert.ok(systemMsgs.length >= 1, 'should have at least 1 system message');
+    assert.ok(systemMsgs.some(m => m.content === 'You are a helpful assistant'),
+      'original system message should be preserved');
+    deleteMemory(convId);
+  });
+
+  it('should keep recent messages after trimming', async () => {
+    const msgs = [
+      { role: 'system', content: 'prompt' },
+    ];
+    for (let i = 0; i < 20; i++) {
+      msgs.push({ role: 'user', content: 'User msg ' + i });
+      msgs.push({ role: 'assistant', content: 'Assistant msg ' + i });
+    }
+    const lastUserMsg = msgs[msgs.length - 2]; // last user msg
+    const convId = 'test_keep_recent_' + Date.now();
+    const result = await processContext(msgs, convId);
+    assert.ok(result.messages.includes(lastUserMsg),
+      'last user message should be kept');
+    deleteMemory(convId);
+  });
+
+  it('should handle messages with tool_calls gracefully', async () => {
+    const msgs = [
+      { role: 'system', content: 'system prompt' },
+    ];
+    for (let i = 0; i < 15; i++) {
+      msgs.push({ role: 'user', content: 'Please search for item ' + i });
+      msgs.push({
+        role: 'assistant', content: '',
+        tool_calls: [{ id: 'tc_' + i, type: 'function', function: { name: 'search', arguments: '{}' } }]
+      });
+      msgs.push({ role: 'tool', tool_call_id: 'tc_' + i, content: 'result ' + i });
+      msgs.push({ role: 'assistant', content: 'Found result ' + i });
+    }
+    const convId = 'test_tool_calls_' + Date.now();
+    const result = await processContext(msgs, convId);
+    assert.strictEqual(result.trimmed, true);
+    assert.ok(result.messages.length < msgs.length, 'should have fewer messages after trim');
+    // Verify system message is preserved
+    assert.ok(result.messages.some(m => m.role === 'system'),
+      'system message should be preserved');
+    // Verify recent tool interactions are kept
+    const keptTools = result.messages.filter(m => m.role === 'tool');
+    assert.ok(keptTools.length > 0, 'should keep some tool messages');
+    deleteMemory(convId);
+  });
+
+  it('processContext should return valid result structure', async () => {
+    const msgs = [
+      { role: 'system', content: 'test' },
+      { role: 'user', content: 'hi' },
+    ];
+    const result = await processContext(msgs, 'test_structure_' + Date.now());
+    assert.ok(Array.isArray(result.messages));
+    assert.ok(typeof result.trimmed === 'boolean');
+    assert.ok(typeof result.strategy === 'string');
   });
 });
