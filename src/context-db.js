@@ -76,6 +76,21 @@ db.exec(`
     rolled_back     INTEGER DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS idx_audit_conv ON trim_audit_log(conversation_id, created_at);
+
+  CREATE TABLE IF NOT EXISTS request_debug_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT,
+    model           TEXT NOT NULL,
+    message_count   INTEGER NOT NULL,
+    assembled_data  TEXT NOT NULL,
+    strategy        TEXT,
+    response_status TEXT DEFAULT 'pending',
+    error_type      TEXT,
+    error_message   TEXT,
+    latency_ms      INTEGER,
+    created_at      INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_reqlog_status ON request_debug_log(response_status, created_at);
 `);
 
 // 兼容已存在的表：尝试添加新列（忽略"已存在"错误）
@@ -246,6 +261,30 @@ export function markRolledBack(auditId) {
   db.prepare(`UPDATE trim_audit_log SET rolled_back = 1 WHERE id = ?`).run(auditId);
 }
 
+// === 请求调试日志函数 ===
+
+export function saveRequestLog(convId, model, messageCount, assembledData, strategy) {
+  return db.prepare(`INSERT INTO request_debug_log
+    (conversation_id, model, message_count, assembled_data, strategy, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)`).run(convId, model, messageCount, assembledData, strategy, Date.now()).lastInsertRowid;
+}
+
+export function updateRequestLog(logId, status, errorType, errorMessage, latencyMs) {
+  db.prepare(`UPDATE request_debug_log
+    SET response_status=?, error_type=?, error_message=?, latency_ms=?
+    WHERE id=?`).run(status, errorType, errorMessage, latencyMs, logId);
+}
+
+export function getRecentRequestLogs(limit = 20) {
+  return db.prepare(`SELECT id, conversation_id, model, message_count, strategy,
+    response_status, error_type, error_message, latency_ms, created_at
+    FROM request_debug_log ORDER BY created_at DESC LIMIT ?`).all(limit);
+}
+
+export function getRequestLogDetail(logId) {
+  return db.prepare(`SELECT * FROM request_debug_log WHERE id = ?`).get(logId);
+}
+
 // 自动清理
 function cleanup() {
   try {
@@ -259,6 +298,9 @@ function cleanup() {
     stmts.cleanOldAuditUnrolled.run(now - 30 * 24 * 3600 * 1000);
     // 清理90天前的所有审计日志
     stmts.cleanOldAuditAll.run(now - 90 * 24 * 3600 * 1000);
+    // 清理7天前成功的请求日志，保留30天的错误日志
+    db.prepare('DELETE FROM request_debug_log WHERE response_status = ? AND created_at < ?').run('success', now - 7 * 24 * 3600 * 1000);
+    db.prepare('DELETE FROM request_debug_log WHERE created_at < ?').run(now - 30 * 24 * 3600 * 1000);
     log.debug('Context memory cleanup completed');
   } catch (err) {
     log.warn('Context memory cleanup error:', err.message);

@@ -24,6 +24,7 @@ import {
 } from './tool-emulation.js';
 import { sanitizeText, PathSanitizeStream } from '../sanitize.js';
 import { deriveConversationId, processContext, postResponseHook } from '../context-manager.js';
+import { saveRequestLog, updateRequestLog } from '../context-db.js';
 
 const HEARTBEAT_MS = 5_000;
 const QUEUE_RETRY_MS = 1_000;
@@ -228,6 +229,7 @@ export async function handleChatCompletions(body) {
   // get trimmed messages and valid _convId / contextTrimmed values.
   let contextTrimmed = false;
   let _convId = null;
+  let _requestLogId = null;
   if (!_internal && config.contextTrimEnabled) {
     _convId = deriveConversationId(cascadeMessages);
     try {
@@ -236,6 +238,15 @@ export async function handleChatCompletions(body) {
         cascadeMessages = trimResult.messages;
         contextTrimmed = true;
         log.info(`Context trimmed: ${messages.length} -> ${cascadeMessages.length} msgs (strategy=${trimResult.strategy}) convId=${_convId}`);
+        // 记录发送给模型的完整消息（用于排查内容策略拦截）
+        try {
+          const assembledJson = JSON.stringify(cascadeMessages.map(m => ({
+            role: m.role,
+            content: typeof m.content === 'string' ? m.content.slice(0, 2000) : '[non-string]',
+            ...(m.tool_calls ? { tool_calls: true } : {}),
+          })));
+          _requestLogId = saveRequestLog(_convId, displayModel, cascadeMessages.length, assembledJson, trimResult.strategy);
+        } catch (e) { log.debug('saveRequestLog failed:', e.message); }
       }
     } catch (trimErr) {
       log.warn('Context trimming failed, proceeding with original messages:', trimErr.message);
@@ -376,7 +387,12 @@ export async function handleChatCompletions(body) {
       source, creditMultiplier, _msgChars,
       _convId, contextTrimmed,
     );
-    if (result.status === 200) return result;
+    if (result.status === 200) {
+      if (_requestLogId) {
+        try { updateRequestLog(_requestLogId, 'success', null, null, Date.now() - created * 1000); } catch (e) {}
+      }
+      return result;
+    }
     reuseEntry = null; // don't try to reuse on the retry
     lastErr = result;
     const errType = result.body?.error?.type;
@@ -404,6 +420,14 @@ export async function handleChatCompletions(body) {
     if (rl.allLimited) {
       return { status: 429, body: { error: { message: `${displayModel} 所有账号均已达速率限制，请 ${Math.ceil(rl.retryAfterMs / 1000)} 秒后重试`, type: 'rate_limit_exceeded', retry_after_ms: rl.retryAfterMs } } };
     }
+  }
+  if (_requestLogId && lastErr) {
+    try {
+      const errMsg = lastErr.body?.error?.message || 'unknown';
+      const errType = errMsg.includes('content policy') ? 'content_policy'
+        : lastErr.body?.error?.type || 'unknown';
+      updateRequestLog(_requestLogId, 'failed', errType, errMsg.slice(0, 500), Date.now() - created * 1000);
+    } catch (e) {}
   }
   return lastErr || { status: 503, body: { error: { message: 'No active accounts available', type: 'pool_exhausted' } } };
 }
