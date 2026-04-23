@@ -91,3 +91,207 @@ nohup: 忽略输入
 [WARN] Health probe windsurf-session-464e9d6314784a9c98b96757d72161a4 failed (1/3): Request: Client network socket disconnected before secure TLS connection was established
 [WARN] refreshCredits 442d29fb failed: Request: Client network socket disconnected before secure TLS connection was established
 [WARN] Health probe windsurf-session-ddbb74b7d1fe4277a1a275c6d8b3f16c failed (1/3): Request: Client network socket disconnected before secure TLS connection was established
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=1 account=windsurf-session-a4750aea693c4cdebf2b255662eb3a1f ls=42100 turns=2 chars=49
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=1 account=windsurf-session-464e9d6314784a9c98b96757d72161a4 ls=42100 turns=1 chars=299
+[INFO] Context trimmed: 14 -> 13 msgs (strategy=hybrid_full) convId=a54dce706c5bd735
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=1 account=windsurf-session-ddbb74b7d1fe4277a1a275c6d8b3f16c ls=42100 turns=14 chars=76
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=2 account=windsurf-session-fb0417e1fa674d2192844977d1df6b21 ls=42100 turns=14 chars=76
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=3 account=pg7at7ma@atoo.fun ls=42100 turns=14 chars=76
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=4 account=scott.hayes5081@lanbojini.asia ls=42100 turns=14 chars=76
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=5 account=windsurf-session-a4750aea693c4cdebf2b255662eb3a1f ls=42100 turns=14 chars=76
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=6 account=windsurf-session-464e9d6314784a9c98b96757d72161a4 ls=42100 turns=14 chars=76
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=1 account=windsurf-session-ddbb74b7d1fe4277a1a275c6d8b3f16c ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=2 account=windsurf-session-fb0417e1fa674d2192844977d1df6b21 ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=3 account=pg7at7ma@atoo.fun ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=4 account=scott.hayes5081@lanbojini.asia ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=5 account=windsurf-session-a4750aea693c4cdebf2b255662eb3a1f ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=6 account=windsurf-session-464e9d6314784a9c98b96757d72161a4 ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=1 account=windsurf-session-ddbb74b7d1fe4277a1a275c6d8b3f16c ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=2 account=windsurf-session-fb0417e1fa674d2192844977d1df6b21 ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=3 account=pg7at7ma@atoo.fun ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=4 account=scott.hayes5081@lanbojini.asia ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=5 account=windsurf-session-a4750aea693c4cdebf2b255662eb3a1f ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=6 account=windsurf-session-464e9d6314784a9c98b96757d72161a4 ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on gpt-4o-mini (upstream_error), retrying with fresh LS
+[INFO] Chat: model=claude-3.5-sonnet flow=legacy attempt=1 account=windsurf-session-ddbb74b7d1fe4277a1a275c6d8b3f16c ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on claude-3.5-sonnet (upstream_error), retrying with fresh LS
+[INFO] Chat: model=claude-3.5-sonnet flow=legacy attempt=2 account=windsurf-session-fb0417e1fa674d2192844977d1df6b21 ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on claude-3.5-sonnet (upstream_error), retrying with fresh LS
+[INFO] Chat: model=claude-3.5-sonnet flow=legacy attempt=3 account=pg7at7ma@atoo.fun ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on claude-3.5-sonnet (upstream_error), retrying with fresh LS
+[INFO] Chat: model=claude-3.5-sonnet flow=legacy attempt=4 account=scott.hayes5081@lanbojini.asia ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on claude-3.5-sonnet (upstream_error), retrying with fresh LS
+[INFO] Chat: model=claude-3.5-sonnet flow=legacy attempt=5 account=windsurf-session-a4750aea693c4cdebf2b255662eb3a1f ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on claude-3.5-sonnet (upstream_error), retrying with fresh LS
+[INFO] Chat: model=claude-3.5-sonnet flow=legacy attempt=6 account=windsurf-session-464e9d6314784a9c98b96757d72161a4 ls=42100 turns=4 chars=48
+[ERROR] Chat error: invalid_argument: unmarshal message: unmarshal into *chat_pb.RawGetChatMessageRequest: proto: cannot parse invalid wire-format data
+[WARN] Transport error on claude-3.5-sonnet (upstream_error), retrying with fresh LS
+[INFO] Chat: model=claude-3.5-sonnet flow=legacy attempt=1 account=windsurf-session-ddbb74b7d1fe4277a1a275c6d8b3f16c ls=42100 turns=2 chars=49
+[ERROR] Chat error: permission_denied: Model not allowed for user
+[WARN] Account windsurf-session-ddbb74b7d1fe4277a1a275c6d8b3f16c cannot serve claude-3.5-sonnet, trying next account
+[INFO] Chat: model=claude-3.5-sonnet flow=legacy attempt=2 account=windsurf-session-fb0417e1fa674d2192844977d1df6b21 ls=42100 turns=2 chars=49
+[ERROR] Chat error: permission_denied: Model not allowed for user
+[WARN] Account windsurf-session-fb0417e1fa674d2192844977d1df6b21 cannot serve claude-3.5-sonnet, trying next account
+[INFO] Chat: model=claude-3.5-sonnet flow=legacy attempt=3 account=pg7at7ma@atoo.fun ls=42100 turns=2 chars=49
+[ERROR] Chat error: permission_denied: Model not allowed for user
+[WARN] Account pg7at7ma@atoo.fun cannot serve claude-3.5-sonnet, trying next account
+[INFO] Chat: model=claude-3.5-sonnet flow=legacy attempt=4 account=scott.hayes5081@lanbojini.asia ls=42100 turns=2 chars=49
+[ERROR] Chat error: permission_denied: Model not allowed for user
+[WARN] Account scott.hayes5081@lanbojini.asia cannot serve claude-3.5-sonnet, trying next account
+[INFO] Chat: model=claude-3.5-sonnet flow=legacy attempt=5 account=windsurf-session-a4750aea693c4cdebf2b255662eb3a1f ls=42100 turns=2 chars=49
+[ERROR] Chat error: permission_denied: Model not allowed for user
+[WARN] Account windsurf-session-a4750aea693c4cdebf2b255662eb3a1f cannot serve claude-3.5-sonnet, trying next account
+[INFO] Chat: model=claude-3.5-sonnet flow=legacy attempt=6 account=windsurf-session-464e9d6314784a9c98b96757d72161a4 ls=42100 turns=2 chars=49
+[ERROR] Chat error: permission_denied: Model not allowed for user
+[WARN] Account windsurf-session-464e9d6314784a9c98b96757d72161a4 cannot serve claude-3.5-sonnet, trying next account
+[INFO] Chat: model=claude-4-sonnet flow=cascade attempt=1 account=windsurf-session-ddbb74b7d1fe4277a1a275c6d8b3f16c ls=42100 turns=2 chars=49
+[INFO] Cascade workspace init complete for LS port=42100
+[WARN] Cascade short reply {cascadeId=aaa92368 reason=idle_done polls=8 textLen=5 thinkingLen=0 stepCount=3 toolCalls=0 sawActive=true sawText=true lastStatus=1 ms=2078}
+[INFO] Cascade usage: in=3 out=4 cache_r=0 cache_w=1436
+[INFO] Chat: model=claude-4-sonnet flow=cascade attempt=1 account=windsurf-session-fb0417e1fa674d2192844977d1df6b21 ls=42100 turns=4 chars=48
+[WARN] Panel state missing on Send, re-warming + restarting cascade port=42100
+[WARN] AddTrackedWorkspace: uri: file:///tmp/windsurf-workspace: path is already tracked
+[INFO] Cascade workspace init complete for LS port=42100
+[INFO] Cascade done {cascadeId=9d0647a6 reason=idle_done polls=10 textLen=118 thinkingLen=0 stepCount=3 toolCalls=0 sawActive=true sawText=true lastStatus=1 ms=2591}
+[INFO] Cascade usage: in=3 out=34 cache_r=1265 cache_w=196
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=1 account=pg7at7ma@atoo.fun ls=42100 turns=1 chars=356
+[INFO] Context trimmed: 14 -> 13 msgs (strategy=hybrid_full) convId=c715614f1475826f
+[INFO] Chat: model=claude-4-sonnet flow=cascade attempt=1 account=scott.hayes5081@lanbojini.asia ls=42100 turns=14 chars=335
+[WARN] Panel state missing on Send, re-warming + restarting cascade port=42100
+[WARN] AddTrackedWorkspace: uri: file:///tmp/windsurf-workspace: path is already tracked
+[INFO] Cascade workspace init complete for LS port=42100
+[INFO] Cascade done {cascadeId=92fca647 reason=idle_done polls=44 textLen=2396 thinkingLen=0 stepCount=3 toolCalls=0 sawActive=true sawText=true lastStatus=1 ms=11306}
+[INFO] Cascade usage: in=3 out=648 cache_r=0 cache_w=1613
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=1 account=windsurf-session-a4750aea693c4cdebf2b255662eb3a1f ls=42100 turns=1 chars=722
+[INFO] Chat: model=claude-4-sonnet flow=cascade attempt=1 account=windsurf-session-464e9d6314784a9c98b96757d72161a4 ls=42100 turns=12 chars=452
+[WARN] Panel state missing on Send, re-warming + restarting cascade port=42100
+[WARN] AddTrackedWorkspace: uri: file:///tmp/windsurf-workspace: path is already tracked
+[INFO] Cascade workspace init complete for LS port=42100
+[INFO] Cascade done {cascadeId=07983bc2 reason=idle_done polls=38 textLen=1673 thinkingLen=0 stepCount=3 toolCalls=0 sawActive=true sawText=true lastStatus=1 ms=9781}
+[INFO] Cascade usage: in=3 out=390 cache_r=0 cache_w=1565
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=1 account=windsurf-session-ddbb74b7d1fe4277a1a275c6d8b3f16c ls=42100 turns=1 chars=814
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=1 account=windsurf-session-fb0417e1fa674d2192844977d1df6b21 ls=42100 turns=1 chars=365
+[INFO] Context trimmed: 13 -> 13 msgs (strategy=hybrid_full) convId=fadd6e1b80abb632
+[INFO] Chat: model=claude-4-sonnet flow=cascade attempt=1 account=pg7at7ma@atoo.fun ls=42100 turns=13 chars=195 tools=emu
+[WARN] Panel state missing on Send, re-warming + restarting cascade port=42100
+[WARN] AddTrackedWorkspace: uri: file:///tmp/windsurf-workspace: path is already tracked
+[INFO] Cascade workspace init complete for LS port=42100
+[INFO] Cascade done {cascadeId=f13fe227 reason=idle_done polls=37 textLen=1196 thinkingLen=0 stepCount=3 toolCalls=0 sawActive=true sawText=true lastStatus=1 ms=9528}
+[INFO] Cascade usage: in=3 out=324 cache_r=1265 cache_w=319
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=1 account=scott.hayes5081@lanbojini.asia ls=42100 turns=1 chars=580
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=1 account=windsurf-session-a4750aea693c4cdebf2b255662eb3a1f ls=42100 turns=1 chars=380
+[INFO] Context trimmed: 14 -> 13 msgs (strategy=hybrid_full) convId=b75b7e4410f81eaa
+[INFO] Chat: model=claude-4-sonnet flow=cascade attempt=1 account=windsurf-session-464e9d6314784a9c98b96757d72161a4 ls=42100 turns=14 chars=424
+[WARN] Cascade error step {errorText=Reached message rate limit for this model. Please try again later. Resets in: 56m5s trail=[{"type":34,"status":3,"textLen":0,"tools":""},{"type":14,"status":3,"textLen":0,"tools":""},{"type":17,"status":3,"textLen":0,"tools":""}]}
+[WARN] Account 3a2af746 (windsurf-session-464e9d6314784a9c98b96757d72161a4) rate-limited on claude-4-sonnet for 5 min
+[ERROR] Chat error: Reached message rate limit for this model. Please try again later. Resets in: 56m5s
+[WARN] Account windsurf-session-464e9d6314784a9c98b96757d72161a4 rate-limited on claude-4-sonnet, trying next account
+[INFO] Chat: model=claude-4-sonnet flow=cascade attempt=2 account=windsurf-session-ddbb74b7d1fe4277a1a275c6d8b3f16c ls=42100 turns=14 chars=424
+[WARN] Cascade error step {errorText=Reached message rate limit for this model. Please try again later. Resets in: 56m4s trail=[{"type":34,"status":3,"textLen":0,"tools":""},{"type":14,"status":3,"textLen":0,"tools":""},{"type":17,"status":3,"textLen":0,"tools":""}]}
+[WARN] Account 442d29fb (windsurf-session-ddbb74b7d1fe4277a1a275c6d8b3f16c) rate-limited on claude-4-sonnet for 5 min
+[ERROR] Chat error: Reached message rate limit for this model. Please try again later. Resets in: 56m4s
+[WARN] Account windsurf-session-ddbb74b7d1fe4277a1a275c6d8b3f16c rate-limited on claude-4-sonnet, trying next account
+[INFO] Chat: model=claude-4-sonnet flow=cascade attempt=3 account=windsurf-session-fb0417e1fa674d2192844977d1df6b21 ls=42100 turns=14 chars=424
+[WARN] Cascade error step {errorText=Reached message rate limit for this model. Please try again later. Resets in: 56m3s trail=[{"type":34,"status":3,"textLen":0,"tools":""},{"type":14,"status":3,"textLen":0,"tools":""},{"type":17,"status":3,"textLen":0,"tools":""}]}
+[WARN] Account 7e125dd3 (windsurf-session-fb0417e1fa674d2192844977d1df6b21) rate-limited on claude-4-sonnet for 5 min
+[ERROR] Chat error: Reached message rate limit for this model. Please try again later. Resets in: 56m3s
+[WARN] Account windsurf-session-fb0417e1fa674d2192844977d1df6b21 rate-limited on claude-4-sonnet, trying next account
+[INFO] Chat: model=claude-4-sonnet flow=cascade attempt=4 account=pg7at7ma@atoo.fun ls=42100 turns=14 chars=424
+[WARN] Cascade error step {errorText=Reached message rate limit for this model. Please try again later. Resets in: 56m2s trail=[{"type":34,"status":3,"textLen":0,"tools":""},{"type":14,"status":3,"textLen":0,"tools":""},{"type":17,"status":3,"textLen":0,"tools":""}]}
+[WARN] Account 459d6b7f (pg7at7ma@atoo.fun) rate-limited on claude-4-sonnet for 5 min
+[ERROR] Chat error: Reached message rate limit for this model. Please try again later. Resets in: 56m2s
+[WARN] Account pg7at7ma@atoo.fun rate-limited on claude-4-sonnet, trying next account
+[INFO] Chat: model=claude-4-sonnet flow=cascade attempt=5 account=scott.hayes5081@lanbojini.asia ls=42100 turns=14 chars=424
+[WARN] Cascade error step {errorText=Reached message rate limit for this model. Please try again later. Resets in: 56m0s trail=[{"type":34,"status":3,"textLen":0,"tools":""},{"type":14,"status":3,"textLen":0,"tools":""},{"type":17,"status":3,"textLen":0,"tools":""}]}
+[WARN] Account 0fafad87 (scott.hayes5081@lanbojini.asia) rate-limited on claude-4-sonnet for 5 min
+[ERROR] Chat error: Reached message rate limit for this model. Please try again later. Resets in: 56m0s
+[WARN] Account scott.hayes5081@lanbojini.asia rate-limited on claude-4-sonnet, trying next account
+[INFO] Chat: model=claude-4-sonnet flow=cascade attempt=6 account=windsurf-session-a4750aea693c4cdebf2b255662eb3a1f ls=42100 turns=14 chars=424
+[WARN] Panel state missing on Send, re-warming + restarting cascade port=42100
+[WARN] AddTrackedWorkspace: uri: file:///tmp/windsurf-workspace: path is already tracked
+[INFO] Cascade workspace init complete for LS port=42100
+[WARN] Cascade error step {errorText=Reached message rate limit for this model. Please try again later. Resets in: 55m59s trail=[{"type":34,"status":3,"textLen":0,"tools":""},{"type":14,"status":3,"textLen":0,"tools":""},{"type":17,"status":3,"textLen":0,"tools":""}]}
+[WARN] Account 4ad50448 (windsurf-session-a4750aea693c4cdebf2b255662eb3a1f) rate-limited on claude-4-sonnet for 5 min
+[ERROR] Chat error: Reached message rate limit for this model. Please try again later. Resets in: 55m59s
+[WARN] Account windsurf-session-a4750aea693c4cdebf2b255662eb3a1f rate-limited on claude-4-sonnet, trying next account
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=1 account=windsurf-session-464e9d6314784a9c98b96757d72161a4 ls=42100 turns=1 chars=380
+[INFO] Context trimmed: 14 -> 13 msgs (strategy=hybrid_full) convId=8bd8acfc04e0292b
+[INFO] Chat: model=claude-4.5-sonnet flow=cascade attempt=1 account=windsurf-session-ddbb74b7d1fe4277a1a275c6d8b3f16c ls=42100 turns=14 chars=424
+[WARN] Cascade error step {errorText=Reached message rate limit for this model. Please try again later. Resets in: 55m44s trail=[{"type":34,"status":3,"textLen":0,"tools":""},{"type":14,"status":3,"textLen":0,"tools":""},{"type":17,"status":3,"textLen":0,"tools":""}]}
+[WARN] Account 442d29fb (windsurf-session-ddbb74b7d1fe4277a1a275c6d8b3f16c) rate-limited on claude-4.5-sonnet for 5 min
+[ERROR] Chat error: Reached message rate limit for this model. Please try again later. Resets in: 55m44s
+[WARN] Account windsurf-session-ddbb74b7d1fe4277a1a275c6d8b3f16c rate-limited on claude-4.5-sonnet, trying next account
+[INFO] Chat: model=claude-4.5-sonnet flow=cascade attempt=2 account=windsurf-session-fb0417e1fa674d2192844977d1df6b21 ls=42100 turns=14 chars=424
+[WARN] Cascade error step {errorText=Reached message rate limit for this model. Please try again later. Resets in: 55m43s trail=[{"type":34,"status":3,"textLen":0,"tools":""},{"type":14,"status":3,"textLen":0,"tools":""},{"type":17,"status":3,"textLen":0,"tools":""}]}
+[WARN] Account 7e125dd3 (windsurf-session-fb0417e1fa674d2192844977d1df6b21) rate-limited on claude-4.5-sonnet for 5 min
+[ERROR] Chat error: Reached message rate limit for this model. Please try again later. Resets in: 55m43s
+[WARN] Account windsurf-session-fb0417e1fa674d2192844977d1df6b21 rate-limited on claude-4.5-sonnet, trying next account
+[INFO] Chat: model=claude-4.5-sonnet flow=cascade attempt=3 account=pg7at7ma@atoo.fun ls=42100 turns=14 chars=424
+[WARN] Cascade error step {errorText=Reached message rate limit for this model. Please try again later. Resets in: 55m42s trail=[{"type":34,"status":3,"textLen":0,"tools":""},{"type":14,"status":3,"textLen":0,"tools":""},{"type":17,"status":3,"textLen":0,"tools":""}]}
+[WARN] Account 459d6b7f (pg7at7ma@atoo.fun) rate-limited on claude-4.5-sonnet for 5 min
+[ERROR] Chat error: Reached message rate limit for this model. Please try again later. Resets in: 55m42s
+[WARN] Account pg7at7ma@atoo.fun rate-limited on claude-4.5-sonnet, trying next account
+[INFO] Chat: model=claude-4.5-sonnet flow=cascade attempt=4 account=scott.hayes5081@lanbojini.asia ls=42100 turns=14 chars=424
+[WARN] Cascade error step {errorText=Reached message rate limit for this model. Please try again later. Resets in: 55m41s trail=[{"type":34,"status":3,"textLen":0,"tools":""},{"type":14,"status":3,"textLen":0,"tools":""},{"type":17,"status":3,"textLen":0,"tools":""}]}
+[WARN] Account 0fafad87 (scott.hayes5081@lanbojini.asia) rate-limited on claude-4.5-sonnet for 5 min
+[ERROR] Chat error: Reached message rate limit for this model. Please try again later. Resets in: 55m41s
+[WARN] Account scott.hayes5081@lanbojini.asia rate-limited on claude-4.5-sonnet, trying next account
+[INFO] Chat: model=claude-4.5-sonnet flow=cascade attempt=5 account=windsurf-session-a4750aea693c4cdebf2b255662eb3a1f ls=42100 turns=14 chars=424
+[WARN] Cascade error step {errorText=Reached message rate limit for this model. Please try again later. Resets in: 55m40s trail=[{"type":34,"status":3,"textLen":0,"tools":""},{"type":14,"status":3,"textLen":0,"tools":""},{"type":17,"status":3,"textLen":0,"tools":""}]}
+[WARN] Account 4ad50448 (windsurf-session-a4750aea693c4cdebf2b255662eb3a1f) rate-limited on claude-4.5-sonnet for 5 min
+[ERROR] Chat error: Reached message rate limit for this model. Please try again later. Resets in: 55m40s
+[WARN] Account windsurf-session-a4750aea693c4cdebf2b255662eb3a1f rate-limited on claude-4.5-sonnet, trying next account
+[INFO] Chat: model=claude-4.5-sonnet flow=cascade attempt=6 account=windsurf-session-464e9d6314784a9c98b96757d72161a4 ls=42100 turns=14 chars=424
+[WARN] Cascade error step {errorText=Reached message rate limit for this model. Please try again later. Resets in: 55m38s trail=[{"type":34,"status":3,"textLen":0,"tools":""},{"type":14,"status":3,"textLen":0,"tools":""},{"type":17,"status":3,"textLen":0,"tools":""}]}
+[WARN] Account 3a2af746 (windsurf-session-464e9d6314784a9c98b96757d72161a4) rate-limited on claude-4.5-sonnet for 5 min
+[ERROR] Chat error: Reached message rate limit for this model. Please try again later. Resets in: 55m38s
+[WARN] Account windsurf-session-464e9d6314784a9c98b96757d72161a4 rate-limited on claude-4.5-sonnet, trying next account
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=1 account=windsurf-session-ddbb74b7d1fe4277a1a275c6d8b3f16c ls=42100 turns=1 chars=380
+[INFO] Context trimmed: 14 -> 13 msgs (strategy=hybrid_full) convId=2ea26b2c5f1f8a75
+[INFO] Chat: model=claude-4.5-haiku flow=cascade attempt=1 account=windsurf-session-fb0417e1fa674d2192844977d1df6b21 ls=42100 turns=14 chars=424
+[INFO] Cascade done {cascadeId=551c9857 reason=idle_done polls=20 textLen=1482 thinkingLen=0 stepCount=3 toolCalls=0 sawActive=true sawText=true lastStatus=1 ms=5168}
+[INFO] Cascade usage: in=1646 out=362 cache_r=0 cache_w=0
+[INFO] Chat: model=gpt-4o-mini flow=legacy attempt=1 account=pg7at7ma@atoo.fun ls=42100 turns=1 chars=803
+[INFO] SIGTERM received — draining 0 in-flight requests (up to 30s)...
+[INFO] HTTP server closed, stopping language server
+[INFO] LS instance default stopped
