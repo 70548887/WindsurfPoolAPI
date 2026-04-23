@@ -472,7 +472,7 @@ export async function processContext(messages, conversationId) {
   const useSemanticScoring = config.contextTrimSemanticEnabled !== false && isModelReady();
   let kept, trimmedForSummary;
   
-  const targetCount = Math.max(5, (config.contextTrimThreshold || 12) - 2);
+  const targetCount = Math.max(5, (config.contextTrimThreshold || 12) - 5);
   if (useSemanticScoring) {
     try {
       ({ kept, trimmedForSummary } = await semanticTrim(messages, targetCount, conversationId));
@@ -551,19 +551,45 @@ export async function processContext(messages, conversationId) {
   }
 
   // 5. 组装最终消息数组
+  const CLAUDE_MESSAGE_LIMIT = 13;
   const systemMsgs = messages.filter(m => m.role === 'system');
+
+  // 合并摘要 + 工作记忆为单条系统消息（节省 1 个槽位）
+  const contextParts = [];
+  if (summaryText) {
+    contextParts.push(`[Compressed History]\n${summaryText}`);
+  }
+  if (workingMemory) {
+    contextParts.push(`[Active Context]\n${workingMemory}`);
+  }
+
   const assembled = [
     ...systemMsgs,
-    ...(summaryText ? [{
+    ...(contextParts.length > 0 ? [{
       role: 'system',
-      content: `[Compressed History - earlier conversation turns]\n${summaryText}`
-    }] : []),
-    ...(workingMemory ? [{
-      role: 'system',
-      content: `[Active Context - recent task state]\n${workingMemory}`
+      content: contextParts.join('\n\n---\n\n')
     }] : []),
     ...kept.filter(m => m.role !== 'system'),
   ];
+
+  // 硬上限保障：如果仍超限，渐进式移除最旧的非系统消息
+  if (assembled.length > CLAUDE_MESSAGE_LIMIT) {
+    log.warn(`[context-manager] Assembled ${assembled.length} msgs exceeds limit ${CLAUDE_MESSAGE_LIMIT}, trimming`);
+    while (assembled.length > CLAUDE_MESSAGE_LIMIT) {
+      // 找到第一条非系统消息（最旧的），优先移除
+      const oldestNonSysIdx = assembled.findIndex(m => m.role !== 'system');
+      if (oldestNonSysIdx >= 0) {
+        assembled.splice(oldestNonSysIdx, 1);
+      } else {
+        // 全是系统消息，移除 Compressed History
+        const ctxIdx = assembled.findIndex(m => m.role === 'system' && m.content && m.content.includes('[Compressed History]'));
+        if (ctxIdx >= 0) {
+          assembled.splice(ctxIdx, 1);
+        }
+        break;
+      }
+    }
+  }
   
   const latencyMs = Date.now() - startTime;
   
