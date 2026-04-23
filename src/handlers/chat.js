@@ -280,6 +280,37 @@ export async function handleChatCompletions(body) {
   let reuseEntry = reuseEnabled ? poolCheckout(fpBefore) : null;
   if (reuseEntry) log.info(`Chat: cascade reuse HIT cascadeId=${reuseEntry.cascadeId.slice(0, 8)}… model=${displayModel}`);
 
+  // ── 内部调用快速路径：直接使用首个可用账户，不轮转重试 ──
+  if (_internal) {
+    const acct = getApiKey([], modelKey);
+    if (!acct) {
+      log.warn('[internal] No active accounts available for internal call');
+      return { status: 503, body: { error: { message: 'No active accounts for internal call' } } };
+    }
+    try {
+      await ensureLs(acct.proxy);
+      const ls = getLsFor(acct.proxy);
+      if (!ls) {
+        log.warn('[internal] No LS instance available for internal call');
+        return { status: 503, body: { error: { message: 'No LS instance available', type: 'ls_unavailable' } } };
+      }
+      log.info(`[internal] model=${displayModel} flow=${useCascade ? 'cascade' : 'legacy'} account=${acct.email} ls=${ls.port}`);
+      const client = new WindsurfClient(acct.apiKey, ls.port, ls.csrfToken);
+      const result = await nonStreamResponse(
+        client, chatId, created, displayModel, modelKey, messages, cascadeMessages, modelEnum, modelUid,
+        useCascade, acct.apiKey, null, // no cache key for internal
+        null, // no pool context
+        emulateTools, toolPreamble,
+        source, creditMultiplier, 0,
+        null, false,
+      );
+      return result;
+    } catch (err) {
+      log.warn(`[internal] Internal call failed: ${err.message}`);
+      return { status: 502, body: { error: { message: err.message } } };
+    }
+  }
+
   // Non-stream: retry with a different account on model-not-available errors
   const tried = [];
   let lastErr = null;

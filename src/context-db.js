@@ -25,6 +25,8 @@ db.exec(`
     summary_version INTEGER DEFAULT 0,
     covered_turns   INTEGER DEFAULT 0,
     model           TEXT,
+    last_trim_hash  TEXT,
+    last_trim_time  INTEGER,
     created_at      INTEGER NOT NULL,
     updated_at      INTEGER NOT NULL,
     expires_at      INTEGER NOT NULL
@@ -76,17 +78,23 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_audit_conv ON trim_audit_log(conversation_id, created_at);
 `);
 
+// 兼容已存在的表：尝试添加新列（忽略"已存在"错误）
+try { db.exec('ALTER TABLE conversation_memory ADD COLUMN last_trim_hash TEXT'); } catch (_) { /* column already exists */ }
+try { db.exec('ALTER TABLE conversation_memory ADD COLUMN last_trim_time INTEGER'); } catch (_) { /* column already exists */ }
+
 // 预编译 SQL 语句
 const stmts = {
   getMemory: db.prepare('SELECT * FROM conversation_memory WHERE conversation_id = ?'),
   upsertMemory: db.prepare(`
-    INSERT INTO conversation_memory (conversation_id, summary, summary_version, covered_turns, model, created_at, updated_at, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO conversation_memory (conversation_id, summary, summary_version, covered_turns, model, last_trim_hash, last_trim_time, created_at, updated_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(conversation_id) DO UPDATE SET
       summary = excluded.summary,
       summary_version = summary_version + 1,
       covered_turns = excluded.covered_turns,
       model = excluded.model,
+      last_trim_hash = excluded.last_trim_hash,
+      last_trim_time = excluded.last_trim_time,
       updated_at = excluded.updated_at,
       expires_at = excluded.expires_at
   `),
@@ -125,10 +133,10 @@ export function getMemory(conversationId) {
   return stmts.getMemory.get(conversationId) || null;
 }
 
-export function upsertMemory(conversationId, summary, coveredTurns, model) {
+export function upsertMemory(conversationId, summary, coveredTurns, model, trimmedHash) {
   const now = Date.now();
   const ttlMs = (config.contextMemoryTtlHours || 24) * 3600000;
-  stmts.upsertMemory.run(conversationId, summary, 0, coveredTurns, model, now, now, now + ttlMs);
+  stmts.upsertMemory.run(conversationId, summary, 0, coveredTurns, model, trimmedHash || null, trimmedHash ? now : null, now, now, now + ttlMs);
 }
 
 export function getRecentMessages(conversationId) {

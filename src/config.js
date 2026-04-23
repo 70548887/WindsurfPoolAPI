@@ -83,6 +83,7 @@ export const config = {
   contextTrimEmbeddingModel: process.env.CONTEXT_TRIM_EMBEDDING_MODEL || 'Xenova/all-MiniLM-L6-v2',
   contextTrimChunkSize: parseInt(process.env.CONTEXT_TRIM_CHUNK_SIZE) || 1500,
   contextTrimAuditEnabled: process.env.CONTEXT_TRIM_AUDIT_ENABLED !== 'false',  // 默认 true
+  contextTrimMinUpdateIntervalMs: parseInt(process.env.CONTEXT_TRIM_MIN_UPDATE_INTERVAL_MS || '60000', 10),
 };
 
 /**
@@ -103,7 +104,8 @@ export function updateConfig(envKey, value) {
         'CONTEXT_TRIM_SEMANTIC_ENABLED': 'contextTrimSemanticEnabled',
         'CONTEXT_TRIM_EMBEDDING_MODEL': 'contextTrimEmbeddingModel',
         'CONTEXT_TRIM_CHUNK_SIZE': 'contextTrimChunkSize',
-        'CONTEXT_TRIM_AUDIT_ENABLED': 'contextTrimAuditEnabled'
+        'CONTEXT_TRIM_AUDIT_ENABLED': 'contextTrimAuditEnabled',
+        'CONTEXT_TRIM_MIN_UPDATE_INTERVAL_MS': 'contextTrimMinUpdateIntervalMs'
     };
 
     const configKey = keyMap[envKey];
@@ -111,7 +113,7 @@ export function updateConfig(envKey, value) {
 
     // 1. 更新内存中的 config (with type coercion for non-string values)
     const boolKeys = ['contextTrimEnabled', 'contextTrimSummaryEnabled', 'contextTrimSemanticEnabled', 'contextTrimAuditEnabled'];
-    const intKeys = ['contextTrimThreshold', 'contextTrimKeepRecent', 'contextMemoryTtlHours', 'contextTrimChunkSize'];
+    const intKeys = ['contextTrimThreshold', 'contextTrimKeepRecent', 'contextMemoryTtlHours', 'contextTrimChunkSize', 'contextTrimMinUpdateIntervalMs'];
     if (boolKeys.includes(configKey)) {
         config[configKey] = String(value).toLowerCase() === 'true';
     } else if (intKeys.includes(configKey)) {

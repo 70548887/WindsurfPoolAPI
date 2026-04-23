@@ -491,7 +491,18 @@ export async function processContext(messages, conversationId) {
   let summaryText = null;
   let strategy = useSemanticScoring ? 'semantic' : 'structural';
   
-  if (config.contextTrimSummaryEnabled && trimmedForSummary.length > 0) {
+  // ── 摘要哈希缓存：相同消息集合不重复生成 ──
+  const trimmedHash = createHash('sha256')
+    .update(JSON.stringify(trimmedForSummary.map(m => `${m.role}:${(m.content||'').slice(0,80)}`)))
+    .digest('hex').slice(0, 16);
+
+  if (longTermMemory && longTermMemory.last_trim_hash === trimmedHash &&
+      Date.now() - (longTermMemory.last_trim_time || 0) < 300000) {
+    // 5 分钟内相同消息集合，直接复用已有摘要
+    summaryText = longTermMemory.summary;
+    strategy = 'cached_hash';
+    log.info(`Reusing cached summary (hash=${trimmedHash}) for convId=${conversationId}`);
+  } else if (config.contextTrimSummaryEnabled && trimmedForSummary.length > 0) {
     try {
       if (longTermMemory && longTermMemory.summary && trimmedForSummary.length <= 2) {
         // 增量合并 (快速路径)
@@ -612,7 +623,9 @@ export async function postResponseHook(conversationId, originalMessages, assista
     const existing = getMemory(conversationId);
     const totalTurns = Math.floor(originalMessages.filter(m => m.role === 'user').length);
     
-    if (!existing || totalTurns - (existing.covered_turns || 0) >= 2) {
+    const minIntervalMs = config.contextTrimMinUpdateIntervalMs || 60000;
+    const timeSinceLastUpdate = existing ? Date.now() - (existing.updated_at || 0) : Infinity;
+    if ((!existing || totalTurns - (existing.covered_turns || 0) >= 2) && timeSinceLastUpdate >= minIntervalMs) {
       // 需要更新摘要
       const nonSystemMsgs = originalMessages.filter(m => m.role !== 'system');
       const useSemanticScoring = config.contextTrimSemanticEnabled !== false && isModelReady();
