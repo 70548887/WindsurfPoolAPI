@@ -242,7 +242,11 @@ export async function handleChatCompletions(body) {
         try {
           const assembledJson = JSON.stringify(cascadeMessages.map(m => ({
             role: m.role,
-            content: typeof m.content === 'string' ? m.content.slice(0, 2000) : '[non-string]',
+            content: typeof m.content === 'string' 
+                  ? m.content.slice(0, 2000) 
+                  : Array.isArray(m.content) 
+                    ? JSON.stringify(m.content).slice(0, 2000)
+                    : `[${typeof m.content}]`,
             ...(m.tool_calls ? { tool_calls: true } : {}),
           })));
           _requestLogId = saveRequestLog(_convId, displayModel, cascadeMessages.length, assembledJson, trimResult.strategy);
@@ -254,7 +258,7 @@ export async function handleChatCompletions(body) {
   }
 
   if (stream) {
-    return streamResponse(chatId, created, displayModel, modelKey, messages, cascadeMessages, modelEnum, modelUid, useCascade, ckey, emulateTools, toolPreamble, source, creditMultiplier, _convId, contextTrimmed, _internal);
+    return streamResponse(chatId, created, displayModel, modelKey, messages, cascadeMessages, modelEnum, modelUid, useCascade, ckey, emulateTools, toolPreamble, source, creditMultiplier, _convId, contextTrimmed, _internal, _requestLogId);
   }
 
   // ── Local response cache (exact body match) ─────────────
@@ -607,7 +611,7 @@ async function nonStreamResponse(client, id, created, model, modelKey, messages,
   }
 }
 
-function streamResponse(id, created, model, modelKey, messages, cascadeMessages, modelEnum, modelUid, useCascade, ckey, emulateTools, toolPreamble, source = 'POST /v1/chat/completions', creditMultiplier = 0, _convId = null, contextTrimmed = false, _internal = false) {
+function streamResponse(id, created, model, modelKey, messages, cascadeMessages, modelEnum, modelUid, useCascade, ckey, emulateTools, toolPreamble, source = 'POST /v1/chat/completions', creditMultiplier = 0, _convId = null, contextTrimmed = false, _internal = false, _requestLogId = null) {
   return {
     status: 200,
     stream: true,
@@ -884,6 +888,10 @@ function streamResponse(id, created, model, modelKey, messages, cascadeMessages,
                 choices: [], usage });
             }
             if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+            // 更新请求调试日志状态
+            if (_requestLogId) {
+              try { updateRequestLog(_requestLogId, 'success', null, null, Date.now() - created * 1000); } catch (e) {}
+            }
             // Post-response: 异步更新上下文记忆 (stream)
             if (_convId && (contextTrimmed || messages.length > 8)) {
               setImmediate(() => postResponseHook(_convId, messages, accText || '').catch(e => log.debug('postResponseHook error:', e.message)));
@@ -916,6 +924,17 @@ function streamResponse(id, created, model, modelKey, messages, cascadeMessages,
 
         // All attempts failed
         log.error('Stream error after retries:', lastErr?.message);
+        // 更新请求调试日志状态
+        if (_requestLogId) {
+          try {
+            const _errMsg = lastErr?.message || 'unknown';
+            const _errType = _errMsg.includes('content policy') ? 'content_policy'
+              : _errMsg.includes('rate limit') || _errMsg.includes('rate_limit') ? 'rate_limit'
+              : _errMsg.includes('unauthenticated') ? 'auth_error'
+              : 'stream_error';
+            updateRequestLog(_requestLogId, 'failed', _errType, _errMsg.slice(0, 500), Date.now() - created * 1000);
+          } catch (e) {}
+        }
         recordRequest({
           model, success: false, durationMs: Date.now() - startTime,
           accountId: currentApiKey, source, credit: 0, tokens: null,
